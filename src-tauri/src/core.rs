@@ -6,21 +6,29 @@ use crate::{
     blocklist::{self, Blocklist},
     config::{self, Config, Loaded, Paths, State, MAX_UNLOCK_MINUTES},
     events::{Event, EventLog, Kind},
+    capture::Capturer,
     evidence::Evidence,
     layers::{AppKiller, Layer},
     session::Transition,
+    watchdog::Restarter,
 };
 use std::collections::HashMap;
+
+/// A clock that restarts this far behind the last reading inside an unlock window was moved, not corrected.
+const CLOCK_SLACK_SECS: i64 = 120;
+/// How often the open window records the wall clock; bounds how far a rollback can still go unnoticed.
+pub(crate) const HEARTBEAT_SECS: i64 = 15;
 
 pub struct Deps {
     pub paths: Paths,
     pub layers: Vec<Box<dyn Layer>>,
-    pub evidence: Evidence,
+    /// The core builds the evidence worker itself so its event handle and the core's always share one lock.
+    pub capturer: Box<dyn Capturer>,
     pub killer: Box<dyn AppKiller>,
     pub clock: Box<dyn Clock>,
     pub elevated: bool,
-    /// Register the scheduled task (release builds outside any sandbox only).
-    pub manage_watchdog: bool,
+    /// The restart task; `Some` only for release builds outside any sandbox.
+    pub restarter: Option<Box<dyn Restarter>>,
 }
 
 pub struct Core {
@@ -41,7 +49,7 @@ pub struct Core {
     pub(crate) last_slow_check: u64,
     pub(crate) last_blocked_app: HashMap<String, u64>,
     pub(crate) last_enforcement_error: Option<String>,
-    pub(crate) manage_watchdog: bool,
+    pub(crate) restarter: Option<Box<dyn Restarter>>,
     /// Set once the user chose to disable protection: ticks stop re-locking while the process winds down.
     pub(crate) disabled: bool,
     pub(crate) watchdog_ok: Option<bool>,
@@ -50,7 +58,7 @@ pub struct Core {
 
 impl Core {
     pub fn new(deps: Deps) -> Result<Core, String> {
-        let Deps { paths, layers, evidence, killer, clock, elevated, manage_watchdog } = deps;
+        let Deps { paths, layers, capturer, killer, clock, elevated, restarter } = deps;
         if let Err(e) = config::prepare_data_dir(&paths, elevated) {
             eprintln!("porteiro: could not prepare {}: {e}", paths.data.display());
         }
@@ -58,12 +66,13 @@ impl Core {
         let cfg_reset = matches!(cfg, Loaded::Reset(_));
         let st = config::load_or_create(&paths.state(), || Ok(State::default()))?.into_inner();
         let (mono, wall) = (clock.mono(), clock.wall());
-        let mut events = EventLog::new(paths.events(), 5000);
+        let events = EventLog::new(paths.events(), 5000);
+        let evidence = Evidence::spawn(capturer, events.sibling(), paths.shots());
         let mut core = Core {
             throttle: Throttle::restore(st.failures, mono),
             cfg: cfg.into_inner(),
             st,
-            events: events.sibling(),
+            events,
             evidence,
             clock,
             applied: None,
@@ -76,13 +85,13 @@ impl Core {
             last_slow_check: 0,
             last_blocked_app: HashMap::new(),
             last_enforcement_error: None,
-            manage_watchdog,
+            restarter,
             disabled: false,
             watchdog_ok: None,
             watchdog_checked: None,
             paths,
         };
-        if let Ok(dropped) = events.prune() {
+        if let Ok(dropped) = core.events.prune() {
             crate::capture::remove(&core.paths.shots(), &dropped);
         }
         core.restore_window(mono, wall);
@@ -94,17 +103,20 @@ impl Core {
         Ok(core)
     }
 
-    /// An unlock window survives a restart only while it is plausible; a deadline further out than the
-    /// maximum window means the clock was moved, and the safe answer is "locked".
+    /// An unlock window survives a restart only while it is plausible: a deadline further out than the maximum
+    /// window, or a clock behind the last reading taken inside the window, means the clock was moved, and the
+    /// safe answer is "locked".
     fn restore_window(&mut self, mono: u64, wall: i64) {
         let Some(until) = self.st.unlocked_until else { return };
         let remaining = until - wall;
-        if remaining > 0 && remaining <= i64::from(MAX_UNLOCK_MINUTES) * 60 + 60 {
+        let moved_back = self.st.seen_wall.is_some_and(|seen| wall + CLOCK_SLACK_SECS < seen);
+        if remaining > 0 && remaining <= i64::from(MAX_UNLOCK_MINUTES) * 60 + 60 && !moved_back {
             self.deadline = Some(mono + remaining as u64);
         } else {
             if remaining > 0 {
                 self.log(Kind::Tamper, "janela de liberação fora do limite (relógio alterado?): bloqueado", false);
             }
+            self.st.seen_wall = None;
             self.st.unlocked_until = None;
             self.save_state();
         }
@@ -213,6 +225,7 @@ impl Core {
         let minutes = minutes.unwrap_or(self.cfg.unlock_minutes).clamp(1, MAX_UNLOCK_MINUTES);
         self.deadline = Some(self.clock.mono() + u64::from(minutes) * 60);
         self.st.unlocked_until = Some(self.clock.wall() + i64::from(minutes) * 60);
+        self.st.seen_wall = Some(self.clock.wall());
         self.save_state();
         self.reapply(false);
         self.log(Kind::UnlockOk, format!("acesso liberado por {minutes} min"), true);
@@ -247,7 +260,7 @@ impl Core {
     }
 
     pub(crate) fn watchdog_managed(&self) -> bool {
-        self.manage_watchdog && self.elevated
+        self.restarter.is_some() && self.elevated
     }
 
     /// Everything queued for capture is on disk before the app lets go of the process.

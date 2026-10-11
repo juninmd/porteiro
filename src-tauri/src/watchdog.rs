@@ -95,6 +95,23 @@ pub fn exists() -> bool {
     exists_named(TASK_NAME)
 }
 
+/// What the core needs from the restart task; faked in tests so the quit path can be exercised.
+pub trait Restarter: Send {
+    fn install(&mut self, work_dir: &Path) -> Result<(), String>;
+    fn remove(&mut self) -> Result<(), String>;
+}
+
+pub struct TaskRestarter;
+
+impl Restarter for TaskRestarter {
+    fn install(&mut self, work_dir: &Path) -> Result<(), String> {
+        install(&std::env::current_exe().map_err(|e| e.to_string())?, work_dir)
+    }
+    fn remove(&mut self) -> Result<(), String> {
+        remove()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

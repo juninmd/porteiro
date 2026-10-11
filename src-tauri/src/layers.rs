@@ -1,6 +1,7 @@
 //! The enforcement layers behind one trait. Order matters when locking: the firewall resolves names
 //! first (needs a working resolver), then hosts and browser policies cut the names off.
 use crate::{blocklist::Blocklist, config::write_json, firewall, hosts, policy};
+use serde::{Deserialize, Serialize};
 use std::{
     net::IpAddr,
     path::PathBuf,
@@ -84,10 +85,19 @@ impl Layer for PolicyLayer {
     }
 }
 
+/// What `ips.json` holds: the addresses and the hosts they were resolved for.
+#[derive(Default, Serialize, Deserialize)]
+struct Remembered {
+    hosts: Vec<String>,
+    ips: Vec<IpAddr>,
+}
+
 pub struct FirewallLayer {
     ips: Vec<IpAddr>,
+    hosts: Vec<String>,
     store: PathBuf,
     netsh: fn(&[String]) -> Result<(), String>,
+    resolve: fn(&[String], Duration) -> Vec<IpAddr>,
 }
 
 fn netsh(args: &[String]) -> Result<(), String> {
@@ -96,8 +106,8 @@ fn netsh(args: &[String]) -> Result<(), String> {
 
 impl FirewallLayer {
     pub fn new(store: PathBuf) -> Self {
-        let ips = std::fs::read(&store).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        FirewallLayer { ips, store, netsh }
+        let known: Remembered = std::fs::read(&store).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        FirewallLayer { ips: known.ips, hosts: known.hosts, store, netsh, resolve: firewall::resolve }
     }
 
     #[cfg(test)]
@@ -125,9 +135,14 @@ impl Layer for FirewallLayer {
         if !locked {
             return Ok(());
         }
-        let fresh = firewall::resolve(&bl.hosts, Duration::from_secs(4));
+        let fresh = (self.resolve)(&bl.hosts, Duration::from_secs(4));
+        // Addresses learned for a host that is no longer blocked must stop being blocked with it.
+        if self.hosts.iter().any(|h| !bl.hosts.contains(h)) {
+            self.ips.clear();
+        }
+        self.hosts = bl.hosts.clone();
         self.ips = firewall::merge(&self.ips, &fresh);
-        write_json(&self.store, &self.ips).map_err(|e| e.to_string())?;
+        write_json(&self.store, &Remembered { hosts: self.hosts.clone(), ips: self.ips.clone() }).map_err(|e| e.to_string())?;
         for (i, chunk) in firewall::chunks(&self.ips).enumerate() {
             (self.netsh)(&firewall::add_args(i, chunk))?;
         }
@@ -178,6 +193,34 @@ mod tests {
         layer.apply(&Blocklist::default(), false).unwrap();
         let calls = CALLS.lock().unwrap().clone();
         assert!(calls.iter().all(|c| c.starts_with("delete rule name=Porteiro-")) && calls.len() >= 8);
+    }
+
+    fn no_netsh(_: &[String]) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn fake_resolve(hosts: &[String], _: Duration) -> Vec<IpAddr> {
+        hosts.iter().filter_map(|h| match h.as_str() {
+            "a.example" => Some("8.8.8.8".parse().unwrap()),
+            "b.example" => Some("1.1.1.1".parse().unwrap()),
+            _ => None,
+        }).collect()
+    }
+
+    #[test]
+    fn addresses_of_a_host_that_is_no_longer_blocked_leave_the_firewall() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("ips.json");
+        let mut layer = FirewallLayer { resolve: fake_resolve, ..FirewallLayer::with_netsh(store.clone(), no_netsh) };
+        let both = Blocklist { hosts: vec!["a.example".into(), "b.example".into()], ..Default::default() };
+        let only_a = Blocklist { hosts: vec!["a.example".into()], ..Default::default() };
+        layer.apply(&both, true).unwrap();
+        assert_eq!(layer.ips.len(), 2);
+        layer.apply(&only_a, true).unwrap();
+        assert_eq!(layer.ips, vec!["8.8.8.8".parse::<IpAddr>().unwrap()], "b.example was unblocked");
+        assert_eq!(FirewallLayer::with_netsh(store, no_netsh).ips, layer.ips, "and the saved set agrees");
+        layer.apply(&both, true).unwrap();
+        assert_eq!(layer.ips.len(), 2, "adding a host again only grows the set");
     }
 
     #[test]

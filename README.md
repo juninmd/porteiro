@@ -50,7 +50,7 @@ Requisitos: Rust estável, Bun, WebView2 e Build Tools do Visual Studio.
 ```powershell
 bun install
 bun run lint && bun run typecheck && bun test    # frontend
-cd src-tauri; cargo test --lib                   # backend (63 testes; rode em debug)
+cd src-tauri; cargo test --lib                   # backend (70 testes; rode em debug)
 bun tauri build                                  # release: exige administrador (manifest requireAdministrator) + instalador NSIS
 ```
 
@@ -62,7 +62,7 @@ $env:PORTEIRO_HOSTS_FILE = "$env:TEMP\porteiro-hosts"   # só a camada hosts, re
 cd src-tauri; cargo run --features tauri/custom-protocol
 ```
 
-Com essas variáveis o firewall, o registro e a tarefa agendada não são usados.
+Com essas variáveis o firewall, o registro e a tarefa agendada não são usados. Elas só valem em builds de debug: o release, que roda elevado, as ignora para que um processo comum não consiga apontá-lo para uma configuração nova com a senha padrão.
 
 Smoke do hardware (webcam + tela), grava em pasta temporária ou em `PORTEIRO_SMOKE_DIR`:
 

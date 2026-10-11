@@ -101,6 +101,32 @@ fn a_clock_moved_back_cannot_stretch_a_persisted_window() {
 }
 
 #[test]
+fn a_rollback_within_the_cap_after_a_long_wait_cannot_stretch_the_window() {
+    let mut h = harness();
+    h.core.unlock("1406", Some(240)).unwrap();
+    for _ in 0..40 {
+        h.advance(300);
+        h.core.tick();
+    }
+    // 200 of 240 minutes used; moving the clock back 200 min would leave 240 min "remaining", which fits the cap.
+    h.wall.fetch_sub(200 * 60, Ordering::SeqCst);
+    let h = h.restart();
+    assert!(h.core.status().locked && blocked(&h));
+    assert!(h.events().iter().any(|e| e.kind == Kind::Tamper));
+}
+
+#[test]
+fn a_small_clock_correction_does_not_throw_away_a_legitimate_window() {
+    let mut h = harness();
+    h.core.unlock("1406", Some(30)).unwrap();
+    h.advance(600);
+    h.core.tick();
+    h.wall.fetch_sub(30, Ordering::SeqCst);
+    let h = h.restart();
+    assert!(!h.core.status().locked, "a 30 s sync correction is not tampering");
+}
+
+#[test]
 fn events_keep_real_time_order_even_though_evidence_is_written_later() {
     let mut h = harness();
     h.core.unlock("1406", None).unwrap();

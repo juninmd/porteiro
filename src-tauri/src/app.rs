@@ -6,10 +6,9 @@ use crate::{
     config::Paths,
     core::{Core, Deps},
     elevation,
-    events::EventLog,
-    evidence::Evidence,
     layers::{FirewallLayer, HostsLayer, Layer, SysinfoKiller},
     session,
+    watchdog::{Restarter, TaskRestarter},
 };
 use std::{
     sync::{atomic::Ordering, Arc, Mutex},
@@ -38,14 +37,13 @@ fn build_core() -> Result<Core, String> {
     if !paths.sandboxed {
         layers.push(Box::new(crate::layers::PolicyLayer(winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE))));
     }
-    let evidence = Evidence::spawn(Box::new(SystemCapturer), EventLog::new(paths.events(), 5000), paths.shots());
     let manage_watchdog = !cfg!(debug_assertions) && !paths.sandboxed;
     Core::new(Deps {
-        evidence,
+        capturer: Box::new(SystemCapturer),
         killer: Box::new(SysinfoKiller),
         clock: Box::new(SystemClock::new()),
         elevated: elevation::is_elevated(),
-        manage_watchdog,
+        restarter: manage_watchdog.then(|| Box::new(TaskRestarter) as Box<dyn Restarter>),
         layers,
         paths,
     })

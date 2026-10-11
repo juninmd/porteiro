@@ -30,9 +30,8 @@ pub struct SystemCapturer;
 impl Capturer for SystemCapturer {
     fn capture(&mut self, dir: &Path, id: &str) -> Capture {
         let mut out = Capture::default();
-        match screens(dir, id) {
-            Ok(files) => out.files.extend(files),
-            Err(e) => out.notes.push(format!("tela: {e}")),
+        if let Err(e) = screens(dir, id, &mut out.files) {
+            out.notes.push(format!("tela: {e}"));
         }
         match webcam(dir, id) {
             Ok(file) => out.files.push(file),
@@ -44,22 +43,31 @@ impl Capturer for SystemCapturer {
 
 fn save_jpeg(img: &RgbImage, path: &Path) -> Result<(), String> {
     let file = File::create(path).map_err(|e| e.to_string())?;
-    JpegEncoder::new_with_quality(BufWriter::new(file), JPEG_QUALITY).encode_image(img).map_err(|e| e.to_string())
+    let saved = JpegEncoder::new_with_quality(BufWriter::new(file), JPEG_QUALITY).encode_image(img).map_err(|e| e.to_string());
+    if saved.is_err() {
+        // A half-written file would be on disk but on no event, so nothing would ever prune it.
+        let _ = fs::remove_file(path);
+    }
+    saved
 }
 
-fn screens(dir: &Path, id: &str) -> Result<Vec<String>, String> {
-    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
-    let mut files = Vec::new();
-    for (n, monitor) in monitors.iter().enumerate() {
-        let img = monitor.capture_image().map_err(|e| e.to_string())?;
+/// Saves each image in turn. `files` keeps every shot written before a failure, so the event still lists them.
+fn save_screens(dir: &Path, id: &str, images: impl IntoIterator<Item = Result<RgbImage, String>>, files: &mut Vec<String>) -> Result<(), String> {
+    for (n, img) in images.into_iter().enumerate() {
         let name = format!("{id}-screen{n}.jpg");
-        save_jpeg(&DynamicImage::ImageRgba8(img).to_rgb8(), &dir.join(&name))?;
+        save_jpeg(&img?, &dir.join(&name))?;
         files.push(name);
     }
     if files.is_empty() {
         return Err("nenhum monitor encontrado".into());
     }
-    Ok(files)
+    Ok(())
+}
+
+fn screens(dir: &Path, id: &str, files: &mut Vec<String>) -> Result<(), String> {
+    let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
+    let images = monitors.iter().map(|m| m.capture_image().map(|img| DynamicImage::ImageRgba8(img).to_rgb8()).map_err(|e| e.to_string()));
+    save_screens(dir, id, images, files)
 }
 
 fn grab_frame() -> Result<RgbImage, String> {
@@ -149,6 +157,22 @@ mod tests {
         let back = image::open(&path).unwrap();
         assert_eq!((back.width(), back.height()), (32, 24));
         assert_eq!(read(dir.path(), &format!("{ID}-cam.jpg")).unwrap()[..2], [0xff, 0xd8]);
+    }
+
+    #[test]
+    fn a_failing_second_monitor_still_reports_the_first_shot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = Vec::new();
+        let images = vec![Ok(RgbImage::from_pixel(8, 8, image::Rgb([1, 2, 3]))), Err("monitor 1 unplugged".to_string())];
+        assert!(save_screens(dir.path(), ID, images, &mut files).is_err());
+        assert_eq!(files, vec![format!("{ID}-screen0.jpg")], "the saved shot must stay attached to the event");
+        assert!(dir.path().join(&files[0]).exists());
+    }
+
+    #[test]
+    fn no_monitors_is_an_error_not_an_empty_success() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(save_screens(dir.path(), ID, Vec::new(), &mut Vec::new()).is_err());
     }
 
     /// Real hardware: `cargo test --lib smoke_capture -- --ignored --nocapture`. Writes into a temp dir, or PORTEIRO_SMOKE_DIR.

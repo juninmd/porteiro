@@ -15,6 +15,9 @@ Tauri 2 (Rust) + React 19 + Tailwind v4 + Vite, Bun, Biome. Windows only.
 ## Rules that must not regress
 - Every config change and unlock goes through `Core::authorize` (throttle + evidence on failure).
 - Anything user-supplied that reaches hosts, the registry or `netsh` passes `blocklist::validate_domain` first.
-- Sandboxed runs (`PORTEIRO_DATA_DIR` / `PORTEIRO_HOSTS_FILE`) must never touch the real firewall, registry or scheduled task.
+- Sandboxed runs (`PORTEIRO_DATA_DIR` / `PORTEIRO_HOSTS_FILE`) must never touch the real firewall, registry or scheduled task, and release builds must ignore those variables (`Paths::from_env`).
+- An open unlock window records the wall clock (`seen_wall`); a restart behind it is tampering, so it relocks.
+- `disable_and_quit` removes the restart task before lifting any layer: a failure must leave the block intact.
+- `Core::new` builds the event log and the evidence worker together so they share one lock; do not pass in a second `EventLog`.
 - Failing closed: unreadable state means locked; a persisted window is honoured only within the maximum length.
 - Do not apply the data-dir ACL when not elevated: an unelevated admin token would lock the developer out.

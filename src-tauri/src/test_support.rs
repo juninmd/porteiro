@@ -5,9 +5,9 @@ use crate::{
     capture::{Capture, Capturer},
     config::Paths,
     core::{Core, Deps},
-    events::{Event, EventLog, Kind},
-    evidence::Evidence,
+    events::{Event, Kind},
     layers::{AppKiller, HostsLayer, Layer},
+    watchdog::Restarter,
 };
 use std::{
     fs,
@@ -79,6 +79,28 @@ impl Layer for FlakyLayer {
     }
 }
 
+/// Stands in for the scheduled task: records the calls and fails removal on demand.
+#[derive(Default)]
+pub struct FakeTask {
+    pub fail_remove: AtomicBool,
+    pub removed: AtomicBool,
+}
+
+pub struct FakeRestarter(pub Arc<FakeTask>);
+
+impl Restarter for FakeRestarter {
+    fn install(&mut self, _: &Path) -> Result<(), String> {
+        Ok(())
+    }
+    fn remove(&mut self) -> Result<(), String> {
+        if self.0.fail_remove.load(Ordering::SeqCst) {
+            return Err("access denied".into());
+        }
+        self.0.removed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 pub struct Harness {
     pub core: Core,
     pub dir: tempfile::TempDir,
@@ -86,21 +108,21 @@ pub struct Harness {
     pub wall: Arc<AtomicI64>,
     pub running: Arc<Mutex<Vec<String>>>,
     pub flaky: Arc<AtomicBool>,
+    pub task: Arc<FakeTask>,
 }
 
-fn build(dir: &tempfile::TempDir, mono: &Arc<AtomicU64>, wall: &Arc<AtomicI64>, running: &Arc<Mutex<Vec<String>>>, flaky: &Arc<AtomicBool>) -> Core {
+fn build(dir: &tempfile::TempDir, mono: &Arc<AtomicU64>, wall: &Arc<AtomicI64>, running: &Arc<Mutex<Vec<String>>>, flaky: &Arc<AtomicBool>, task: &Arc<FakeTask>) -> Core {
     let paths = Paths { data: dir.path().join("data"), hosts: dir.path().join("hosts"), hosts_overridden: true, sandboxed: true };
     let layers: Vec<Box<dyn Layer>> = vec![Box::new(FlakyLayer(flaky.clone())), Box::new(HostsLayer { path: paths.hosts.clone(), sandboxed: true })];
     fs::create_dir_all(paths.shots()).unwrap();
-    let evidence = Evidence::spawn(Box::new(FakeCapturer(Arc::default())), EventLog::new(paths.events(), 5000), paths.shots());
     Core::new(Deps {
         paths,
         layers,
-        evidence,
+        capturer: Box::new(FakeCapturer(Arc::default())),
         killer: Box::new(FakeKiller(running.clone())),
         clock: Box::new(FakeClock { mono: mono.clone(), wall: wall.clone(), ticks: AtomicU64::new(0) }),
         elevated: true,
-        manage_watchdog: false,
+        restarter: Some(Box::new(FakeRestarter(task.clone()))),
     })
     .expect("core starts")
 }
@@ -109,9 +131,9 @@ pub fn harness() -> Harness {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("hosts"), "127.0.0.1 localhost\r\n").unwrap();
     let (mono, wall) = (Arc::new(AtomicU64::new(100)), Arc::new(AtomicI64::new(START_WALL)));
-    let (running, flaky) = (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)));
-    let core = build(&dir, &mono, &wall, &running, &flaky);
-    Harness { core, dir, mono, wall, running, flaky }
+    let (running, flaky, task) = (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)), Arc::new(FakeTask::default()));
+    let core = build(&dir, &mono, &wall, &running, &flaky, &task);
+    Harness { core, dir, mono, wall, running, flaky, task }
 }
 
 impl Harness {
@@ -136,9 +158,9 @@ impl Harness {
     /// Simulates quitting and relaunching the app on the same disk, with the clocks as they are now.
     pub fn restart(self) -> Harness {
         self.core.flush_evidence();
-        let Harness { core, dir, mono, wall, running, flaky } = self;
+        let Harness { core, dir, mono, wall, running, flaky, task } = self;
         drop(core);
-        let core = build(&dir, &mono, &wall, &running, &flaky);
-        Harness { core, dir, mono, wall, running, flaky }
+        let core = build(&dir, &mono, &wall, &running, &flaky, &task);
+        Harness { core, dir, mono, wall, running, flaky, task }
     }
 }

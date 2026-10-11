@@ -1,5 +1,9 @@
 //! Periodic enforcement: expiry of unlock windows, drift detection, applying the layers in order.
-use crate::{api::LayerStatus, core::Core, events::Kind};
+use crate::{
+    api::LayerStatus,
+    core::{Core, HEARTBEAT_SECS},
+    events::Kind,
+};
 
 impl Core {
     pub fn tick(&mut self) {
@@ -15,6 +19,9 @@ impl Core {
             self.applied = None;
         }
         let locked = self.deadline.is_none();
+        if !locked {
+            self.heartbeat();
+        }
         if self.applied == Some(locked) {
             let slow = now.saturating_sub(self.last_slow_check) >= 30;
             let drift = self.drifted(locked, slow);
@@ -35,6 +42,16 @@ impl Core {
             self.enforce_apps(now);
         }
         self.refresh_watchdog(now);
+    }
+
+    /// While a window is open the wall clock is written down now and then, so a restart can tell the clock was
+    /// moved back. Moving it forward only shortens the window.
+    fn heartbeat(&mut self) {
+        let wall = self.clock.wall();
+        if self.st.seen_wall.is_none_or(|seen| wall - seen >= HEARTBEAT_SECS) {
+            self.st.seen_wall = Some(wall);
+            self.save_state();
+        }
     }
 
     fn drifted(&mut self, locked: bool, include_slow: bool) -> Vec<String> {
@@ -102,13 +119,13 @@ impl Core {
     }
 
     fn refresh_watchdog(&mut self, now: u64) {
-        if !self.manage_watchdog || !self.elevated || self.watchdog_checked.is_some_and(|t| now.saturating_sub(t) < 60) {
+        if !self.watchdog_managed() || self.watchdog_checked.is_some_and(|t| now.saturating_sub(t) < 60) {
             return;
         }
         self.watchdog_checked = Some(now);
-        let exe = std::env::current_exe().ok();
+        let data = self.paths.data.clone();
         // Re-registered on every check so a moved install or a deleted task heals itself.
-        let ok = exe.is_some_and(|exe| crate::watchdog::install(&exe, &self.paths.data).is_ok());
+        let ok = self.restarter.as_mut().is_some_and(|r| r.install(&data).is_ok());
         if self.watchdog_ok == Some(true) && !ok {
             self.log(Kind::EnforcementError, "não foi possível registrar a tarefa de reinício", false);
         }

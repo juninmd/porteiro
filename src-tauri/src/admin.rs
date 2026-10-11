@@ -76,12 +76,15 @@ impl Core {
     /// The only way out: lifts every layer, removes the restart task and records it. Caller exits the process.
     pub fn disable_and_quit(&mut self, password: &str) -> Result<(), ApiError> {
         self.authorize(password, "desativar a proteção")?;
+        // Task first: if it cannot go, nothing else was touched and the block stays whole.
+        if self.watchdog_managed() {
+            if let Some(task) = self.restarter.as_mut() {
+                task.remove().map_err(|e| ApiError::new("internal", format!("não foi possível remover a tarefa de reinício: {e}")))?;
+            }
+        }
         self.log(Kind::Quit, "proteção desativada e app encerrado", true);
         self.begin_disable();
         self.reapply(false);
-        if self.watchdog_managed() {
-            crate::watchdog::remove().map_err(|e| ApiError::new("internal", format!("não foi possível remover a tarefa de reinício: {e}")))?;
-        }
         self.flush_evidence();
         Ok(())
     }
@@ -133,6 +136,20 @@ mod tests {
         assert!(!h.hosts_text().contains("instagram.com"));
         h.core.flush_evidence();
         assert!(h.kinds().contains(&crate::events::Kind::Quit));
+    }
+
+    #[test]
+    fn a_restart_task_that_cannot_be_removed_leaves_the_block_whole() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let mut h = harness();
+        h.task.fail_remove.store(true, SeqCst);
+        assert_eq!(h.core.disable_and_quit("1406").unwrap_err().code, "internal");
+        assert!(h.hosts_text().contains("instagram.com"), "the block must survive a failed quit");
+        h.core.tick();
+        assert!(h.core.status().locked, "ticks keep enforcing after the failed attempt");
+        h.task.fail_remove.store(false, SeqCst);
+        h.core.disable_and_quit("1406").unwrap();
+        assert!(!h.hosts_text().contains("instagram.com") && h.task.removed.load(SeqCst));
     }
 
     #[test]
