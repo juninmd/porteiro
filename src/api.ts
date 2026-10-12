@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { LogEvent, Status } from "./types";
+import type { Credential, LogEvent, Status } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -30,19 +30,23 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 }
 
+export const password = (value: string): Credential => ({ kind: "password", password: value });
+export const hello: Credential = { kind: "hello" };
+
 export const api = {
   status: () => call<Status>("get_status"),
-  unlock: (password: string, minutes: number) => call<Status>("unlock", { password, minutes }),
+  setupPassword: (password: string) => call<Status>("setup_password", { password }),
+  unlock: (auth: Credential, minutes: number) => call<Status>("unlock", { auth, minutes }),
   relock: () => call<Status>("relock"),
   events: (offset: number, limit: number) => call<LogEvent[]>("list_events", { offset, limit }),
   shot: (name: string) => call<ArrayBuffer>("get_shot", { name }),
-  addDomain: (password: string, domain: string) => call<Status>("add_domain", { password, domain }),
-  removeDomain: (password: string, domain: string) => call<Status>("remove_domain", { password, domain }),
-  setService: (password: string, id: string, enabled: boolean) =>
-    call<Status>("set_service", { password, id, enabled }),
-  setUnlockMinutes: (password: string, minutes: number) => call<Status>("set_unlock_minutes", { password, minutes }),
+  addDomain: (auth: Credential, domain: string) => call<Status>("add_domain", { auth, domain }),
+  removeDomain: (auth: Credential, domain: string) => call<Status>("remove_domain", { auth, domain }),
+  setService: (auth: Credential, id: string, enabled: boolean) => call<Status>("set_service", { auth, id, enabled }),
+  setUnlockMinutes: (auth: Credential, minutes: number) => call<Status>("set_unlock_minutes", { auth, minutes }),
   changePassword: (current: string, next: string) => call<Status>("change_password", { current, next }),
-  disableAndQuit: async (password: string): Promise<undefined> => {
-    await call<null>("disable_and_quit", { password });
+  setHello: (auth: Credential, enabled: boolean) => call<Status>("set_hello", { auth, enabled }),
+  disableAndQuit: async (auth: Credential): Promise<undefined> => {
+    await call<null>("disable_and_quit", { auth });
   },
 };

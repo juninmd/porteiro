@@ -17,6 +17,20 @@ pub fn verify(phc: &str, password: &str) -> bool {
     PasswordHash::new(phc).is_ok_and(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
 }
 
+/// What a caller offers as proof that the owner is present. `Hello` means the command layer already got a
+/// yes from Windows Hello; the core still checks that the owner turned it on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Proof {
+    Password(String),
+    Hello,
+}
+
+impl From<&str> for Proof {
+    fn from(password: &str) -> Self {
+        Proof::Password(password.to_string())
+    }
+}
+
 pub fn validate_new_password(password: &str) -> Result<(), &'static str> {
     match password.chars().count() {
         0..=3 => Err("password_too_short"),

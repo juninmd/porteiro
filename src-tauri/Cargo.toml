@@ -34,6 +34,9 @@ strip = true
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
 winreg = "0.56.0"
+# Windows Hello (UserConsentVerifier); already in the tree through tauri.
+windows-future = "0.3.2"
+windows = { version = "0.62.2", features = ["Foundation", "Security_Credentials_UI", "Win32_Foundation", "Win32_System_WinRT"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

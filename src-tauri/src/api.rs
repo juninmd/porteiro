@@ -74,7 +74,10 @@ pub struct Status {
     pub unlock_remaining_secs: Option<u64>,
     pub lockout_secs: Option<u64>,
     pub elevated: bool,
-    pub default_password: bool,
+    /// No password exists yet (first run, or the config was lost): the app is locked until one is set.
+    pub needs_setup: bool,
+    pub hello_available: bool,
+    pub hello_enabled: bool,
     pub layers: Vec<LayerStatus>,
     pub services: Vec<ServiceInfo>,
     pub custom_domains: Vec<String>,

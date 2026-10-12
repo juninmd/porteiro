@@ -7,6 +7,7 @@ use crate::{
     core::{Core, Deps},
     elevation,
     layers::{FirewallLayer, HostsLayer, Layer, SysinfoKiller},
+    hello::Verifier,
     session,
     watchdog::{Restarter, TaskRestarter},
 };
@@ -24,7 +25,14 @@ use tauri::{
 const TICK: Duration = Duration::from_secs(5);
 const SESSION_POLL: Duration = Duration::from_secs(1);
 
-fn build_core() -> Result<Core, String> {
+fn verifier() -> Arc<dyn Verifier> {
+    #[cfg(windows)]
+    return Arc::new(crate::hello::WindowsHello);
+    #[cfg(not(windows))]
+    Arc::new(crate::hello::NoHello)
+}
+
+fn build_core(hello_available: bool) -> Result<Core, String> {
     let paths = Paths::resolve();
     let mut layers: Vec<Box<dyn Layer>> = Vec::new();
     // A sandboxed run (PORTEIRO_DATA_DIR / PORTEIRO_HOSTS_FILE) only ever touches its redirected files:
@@ -43,6 +51,7 @@ fn build_core() -> Result<Core, String> {
         killer: Box::new(SysinfoKiller),
         clock: Box::new(SystemClock::new()),
         elevated: elevation::is_elevated(),
+        hello_available,
         restarter: manage_watchdog.then(|| Box::new(TaskRestarter) as Box<dyn Restarter>),
         layers,
         paths,
@@ -88,7 +97,9 @@ pub fn run() {
             }
         }))
         .setup(move |app| {
-            let core: Shared = Arc::new(Mutex::new(build_core()?));
+            let hello = verifier();
+            let core: Shared = Arc::new(Mutex::new(build_core(hello.available())?));
+            app.manage(hello);
             app.manage(core.clone());
             spawn_loops(core);
 
@@ -123,6 +134,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
+            commands::setup_password,
+            commands::set_hello,
             commands::unlock,
             commands::relock,
             commands::list_events,

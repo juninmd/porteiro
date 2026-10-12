@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alerts, alertsFor } from "./components/Alerts";
 import { Events } from "./components/Events";
 import { Settings } from "./components/Settings";
+import { Setup } from "./components/Setup";
 import { Sites } from "./components/Sites";
 import { StatusPanel } from "./components/StatusPanel";
 import { useStatus } from "./hooks";
@@ -54,13 +55,14 @@ export default function App() {
         </nav>
       </header>
 
-      <Alerts alerts={alertsFor(status, () => setTab("settings"))} />
+      <Alerts alerts={alertsFor(status)} />
 
       <main className="flex-1">
-        {tab === "home" && <StatusPanel status={status} onStatus={apply} />}
-        {tab === "sites" && <Sites status={status} onStatus={apply} />}
-        {tab === "log" && <Events eventCount={status.event_count} />}
-        {tab === "settings" && <Settings status={status} onStatus={apply} />}
+        {status.needs_setup && <Setup onStatus={apply} />}
+        {!status.needs_setup && tab === "home" && <StatusPanel status={status} onStatus={apply} />}
+        {!status.needs_setup && tab === "sites" && <Sites status={status} onStatus={apply} />}
+        {!status.needs_setup && tab === "log" && <Events eventCount={status.event_count} />}
+        {!status.needs_setup && tab === "settings" && <Settings status={status} onStatus={apply} />}
       </main>
     </div>
   );

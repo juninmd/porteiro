@@ -3,7 +3,8 @@ use crate::{
     api::Clock,
     blocklist::Blocklist,
     capture::{Capture, Capturer},
-    config::Paths,
+    auth,
+    config::{write_json, Config, Paths},
     core::{Core, Deps},
     events::{Event, Kind},
     layers::{AppKiller, HostsLayer, Layer},
@@ -123,13 +124,32 @@ fn build(dir: &tempfile::TempDir, mono: &Arc<AtomicU64>, wall: &Arc<AtomicI64>, 
         clock: Box::new(FakeClock { mono: mono.clone(), wall: wall.clone(), ticks: AtomicU64::new(0) }),
         elevated: true,
         restarter: Some(Box::new(FakeRestarter(task.clone()))),
+        hello_available: true,
     })
     .expect("core starts")
 }
 
+/// The password every test harness is set up with.
+pub const TEST_PASSWORD: &str = "1406";
+
+/// A harness on its first run: no password exists yet.
+pub fn unconfigured_harness() -> Harness {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("hosts"), "127.0.0.1 localhost\r\n").unwrap();
+    start(dir)
+}
+
+/// A harness whose owner already chose `TEST_PASSWORD`.
 pub fn harness() -> Harness {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("hosts"), "127.0.0.1 localhost\r\n").unwrap();
+    fs::create_dir_all(dir.path().join("data")).unwrap();
+    let config = Config { password_hash: Some(auth::hash(TEST_PASSWORD).unwrap()), ..Config::fresh().unwrap() };
+    write_json(&dir.path().join("data").join("config.json"), &config).unwrap();
+    start(dir)
+}
+
+fn start(dir: tempfile::TempDir) -> Harness {
     let (mono, wall) = (Arc::new(AtomicU64::new(100)), Arc::new(AtomicI64::new(START_WALL)));
     let (running, flaky, task) = (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)), Arc::new(FakeTask::default()));
     let core = build(&dir, &mono, &wall, &running, &flaky, &task);

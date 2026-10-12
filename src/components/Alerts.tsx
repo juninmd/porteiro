@@ -2,7 +2,7 @@ import type { Status } from "../types";
 
 type Alert = { id: string; tone: "danger" | "warn"; text: string; action?: { label: string; go: () => void } };
 
-export function alertsFor(status: Status, goSettings: () => void): Alert[] {
+export function alertsFor(status: Status): Alert[] {
   const list: Alert[] = [];
   if (!status.elevated) {
     list.push({
@@ -23,14 +23,6 @@ export function alertsFor(status: Status, goSettings: () => void): Alert[] {
       id: "watchdog",
       tone: "warn",
       text: "A tarefa que reinicia o app caso ele seja encerrado não está registrada.",
-    });
-  }
-  if (status.default_password) {
-    list.push({
-      id: "default-pw",
-      tone: "warn",
-      text: "Você ainda usa a senha padrão (1406). Qualquer pessoa que a conheça libera tudo.",
-      action: { label: "Trocar senha", go: goSettings },
     });
   }
   return list;

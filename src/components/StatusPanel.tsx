@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
-import { ApiError, api } from "../api";
+import { ApiError, api, password as asPassword, hello } from "../api";
 import { formatCountdown, spokenCountdown } from "../format";
-import type { Status } from "../types";
+import type { Credential, Status } from "../types";
 
 const DURATIONS = [5, 15, 30, 60, 120];
 
@@ -12,12 +12,11 @@ function UnlockForm({ status, onStatus }: { status: Status; onStatus: (s: Status
   const [busy, setBusy] = useState(false);
   const lockedOut = status.lockout_secs !== null;
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const attempt = async (auth: Credential) => {
     setBusy(true);
     setError(null);
     try {
-      onStatus(await api.unlock(password, minutes));
+      onStatus(await api.unlock(auth, minutes));
       setPassword("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "não foi possível liberar");
@@ -25,6 +24,11 @@ function UnlockForm({ status, onStatus }: { status: Status; onStatus: (s: Status
     } finally {
       setBusy(false);
     }
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void attempt(asPassword(password));
   };
 
   const options = DURATIONS.includes(status.unlock_minutes)
@@ -67,6 +71,16 @@ function UnlockForm({ status, onStatus }: { status: Status; onStatus: (s: Status
       >
         {busy ? "Verificando…" : "Liberar"}
       </button>
+      {status.hello_enabled && (
+        <button
+          type="button"
+          disabled={busy || lockedOut}
+          onClick={() => void attempt(hello)}
+          className="rounded-lg border border-line px-5 py-2 text-base text-ink hover:bg-raised disabled:opacity-50 sm:col-span-3 sm:justify-self-start"
+        >
+          Liberar com Windows Hello
+        </button>
+      )}
       <p role="alert" className="min-h-5 text-sm text-danger sm:col-span-3">
         {lockedOut ? `Muitas tentativas. Aguarde ${formatCountdown(status.lockout_secs ?? 0)}.` : error}
       </p>
