@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Credential, LogEvent, Status } from "./types";
+import type { Credential, LogEvent, Status, TelegramAlerts, TelegramView } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -46,6 +46,13 @@ export const api = {
   setUnlockMinutes: (auth: Credential, minutes: number) => call<Status>("set_unlock_minutes", { auth, minutes }),
   changePassword: (current: string, next: string) => call<Status>("change_password", { current, next }),
   setHello: (auth: Credential, enabled: boolean) => call<Status>("set_hello", { auth, enabled }),
+  telegram: () => call<TelegramView>("telegram_status"),
+  telegramConnect: (auth: Credential, token: string) => call<TelegramView>("telegram_connect", { auth, token }),
+  telegramPair: (auth: Credential) => call<TelegramView>("telegram_pair", { auth }),
+  telegramRemoveChat: (auth: Credential, chat: number) => call<TelegramView>("telegram_remove_chat", { auth, chat }),
+  telegramSetAlerts: (auth: Credential, alerts: TelegramAlerts) =>
+    call<TelegramView>("telegram_set_alerts", { auth, alerts }),
+  telegramDisconnect: (auth: Credential) => call<TelegramView>("telegram_disconnect", { auth }),
   disableAndQuit: async (auth: Credential): Promise<undefined> => {
     await call<null>("disable_and_quit", { auth });
   },

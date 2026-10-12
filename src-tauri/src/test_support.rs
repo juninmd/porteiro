@@ -8,6 +8,7 @@ use crate::{
     core::{Core, Deps},
     events::{Event, Kind},
     layers::{AppKiller, HostsLayer, Layer},
+    telegram::{self, Hub, Job, Msg},
     watchdog::Restarter,
 };
 use std::{
@@ -15,6 +16,7 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+        mpsc::{self, Receiver, Sender},
         Arc, Mutex,
     },
 };
@@ -110,14 +112,22 @@ pub struct Harness {
     pub running: Arc<Mutex<Vec<String>>>,
     pub flaky: Arc<AtomicBool>,
     pub task: Arc<FakeTask>,
+    /// The Telegram settings, and what the notifier handed to the outbox (nothing until a chat is paired).
+    pub hub: Hub,
+    pub jobs: Receiver<Job>,
+    tx: Sender<Msg>,
 }
 
-fn build(dir: &tempfile::TempDir, mono: &Arc<AtomicU64>, wall: &Arc<AtomicI64>, running: &Arc<Mutex<Vec<String>>>, flaky: &Arc<AtomicBool>, task: &Arc<FakeTask>) -> Core {
+fn build(dir: &tempfile::TempDir, mono: &Arc<AtomicU64>, wall: &Arc<AtomicI64>, running: &Arc<Mutex<Vec<String>>>, flaky: &Arc<AtomicBool>, task: &Arc<FakeTask>, tx: &Sender<Msg>) -> (Core, Hub) {
     let paths = Paths { data: dir.path().join("data"), hosts: dir.path().join("hosts"), hosts_overridden: true, sandboxed: true };
     let layers: Vec<Box<dyn Layer>> = vec![Box::new(FlakyLayer(flaky.clone())), Box::new(HostsLayer { path: paths.hosts.clone(), sandboxed: true })];
     fs::create_dir_all(paths.shots()).unwrap();
-    Core::new(Deps {
+    let telegram = Hub::load(paths.telegram()).unwrap();
+    let notifier = telegram::notifier(telegram.clone(), tx.clone());
+    let core = Core::new(Deps {
         paths,
+        telegram: telegram.clone(),
+        notifier: Some(notifier),
         layers,
         capturer: Box::new(FakeCapturer(Arc::default())),
         killer: Box::new(FakeKiller(running.clone())),
@@ -126,7 +136,8 @@ fn build(dir: &tempfile::TempDir, mono: &Arc<AtomicU64>, wall: &Arc<AtomicI64>, 
         restarter: Some(Box::new(FakeRestarter(task.clone()))),
         hello_available: true,
     })
-    .expect("core starts")
+    .expect("core starts");
+    (core, telegram)
 }
 
 /// The password every test harness is set up with.
@@ -141,19 +152,36 @@ pub fn unconfigured_harness() -> Harness {
 
 /// A harness whose owner already chose `TEST_PASSWORD`.
 pub fn harness() -> Harness {
+    harness_with(|_| ())
+}
+
+/// Like `harness`, with a chance to put files in the data dir before the core reads them.
+pub fn harness_with(prepare: impl FnOnce(&std::path::Path)) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("hosts"), "127.0.0.1 localhost\r\n").unwrap();
     fs::create_dir_all(dir.path().join("data")).unwrap();
     let config = Config { password_hash: Some(auth::hash(TEST_PASSWORD).unwrap()), ..Config::fresh().unwrap() };
     write_json(&dir.path().join("data").join("config.json"), &config).unwrap();
+    prepare(&dir.path().join("data"));
     start(dir)
 }
 
 fn start(dir: tempfile::TempDir) -> Harness {
     let (mono, wall) = (Arc::new(AtomicU64::new(100)), Arc::new(AtomicI64::new(START_WALL)));
     let (running, flaky, task) = (Arc::new(Mutex::new(Vec::new())), Arc::new(AtomicBool::new(false)), Arc::new(FakeTask::default()));
-    let core = build(&dir, &mono, &wall, &running, &flaky, &task);
-    Harness { core, dir, mono, wall, running, flaky, task }
+    // Stands in for the outbox thread: hands alerts over in order and answers flushes, like the real one.
+    let (tx, queue) = mpsc::channel::<Msg>();
+    let (handed, jobs) = mpsc::channel::<Job>();
+    std::thread::spawn(move || {
+        for msg in queue {
+            match msg {
+                Msg::Alert(job) => drop(handed.send(job)),
+                Msg::Flush(done) => drop(done.send(())),
+            }
+        }
+    });
+    let (core, hub) = build(&dir, &mono, &wall, &running, &flaky, &task, &tx);
+    Harness { core, dir, mono, wall, running, flaky, task, hub, jobs, tx }
 }
 
 impl Harness {
@@ -171,6 +199,21 @@ impl Harness {
         self.core.list_events(0, 200)
     }
 
+    /// Pairs one chat the way a person would: open the window, send the code.
+    pub fn pair_chat(&self, chat: i64) {
+        let now = self.mono.load(Ordering::SeqCst);
+        self.hub.connect("1:token", "porteiro_bot").unwrap();
+        self.hub.start_pairing(now).unwrap();
+        let code = self.hub.view(now).pairing.unwrap().code;
+        self.hub.try_pair(chat, "Ana", &code, now).unwrap();
+    }
+
+    /// Alerts queued for delivery so far, once the evidence worker has finished its backlog.
+    pub fn alerts(&self) -> Vec<Job> {
+        self.core.flush_evidence();
+        self.jobs.try_iter().collect()
+    }
+
     pub fn kinds(&self) -> Vec<Kind> {
         self.events().into_iter().map(|e| e.kind).collect()
     }
@@ -178,9 +221,9 @@ impl Harness {
     /// Simulates quitting and relaunching the app on the same disk, with the clocks as they are now.
     pub fn restart(self) -> Harness {
         self.core.flush_evidence();
-        let Harness { core, dir, mono, wall, running, flaky, task } = self;
+        let Harness { core, dir, mono, wall, running, flaky, task, jobs, tx, .. } = self;
         drop(core);
-        let core = build(&dir, &mono, &wall, &running, &flaky, &task);
-        Harness { core, dir, mono, wall, running, flaky, task }
+        let (core, hub) = build(&dir, &mono, &wall, &running, &flaky, &task, &tx);
+        Harness { core, dir, mono, wall, running, flaky, task, hub, jobs, tx }
     }
 }

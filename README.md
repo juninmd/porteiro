@@ -9,7 +9,7 @@
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust)
-![Testes](https://img.shields.io/badge/testes-70-brightgreen)
+![Testes](https://img.shields.io/badge/testes-156-brightgreen)
 
 <img src="docs/painel-bloqueado.png" alt="Painel do Porteiro com o bloqueio ativo" width="720">
 
@@ -26,6 +26,7 @@
 - 🪪 **Windows Hello.** Opcional: rosto, digital ou PIN do Windows liberam no lugar de digitar a senha (Ajustes → Windows Hello).
 - ⏱️ **Liberação com prazo.** De 1 a 240 min; o bloqueio volta sozinho. *Bloquear agora* não pede senha.
 - 📸 **Monitoria.** Cada tentativa (certa ou errada), cada desbloqueio do Windows e cada tentativa de burlar vira um evento com **foto da webcam e print de cada monitor**.
+- 📲 **Telegram (opcional).** Cada liberação, senha errada e violação chega no seu Telegram, ou no de outra pessoa que acompanhe, com a foto da webcam. A prova sai do PC: apagar o registro local não apaga o que já foi enviado.
 - 🛡️ **Difícil de fechar.** O botão de fechar só esconde a janela; a única saída é *Desativar e sair*, com senha. Uma tarefa agendada reabre o app em até 1 min.
 - 👀 **Sem esconder nada.** Tem janela, ícone na bandeja e tudo aparece no Registro. Não existe modo oculto.
 
@@ -41,7 +42,34 @@
 | **Painel** | Digite a senha (ou use *Liberar com Windows Hello*), escolha a duração e clique em *Liberar*. |
 | **Sites** | Liga e desliga os quatro serviços e adiciona domínios extras. `reddit.com` cobre também `www.reddit.com` e qualquer subdomínio. Toda mudança pede a senha. |
 | **Registro** | Linha do tempo dos eventos, com as evidências (webcam primeiro, depois cada monitor). |
+| **Telegram** | Conecta um bot, pareia chats e escolhe o que vai para o Telegram. Toda mudança pede a senha. |
 | **Ajustes** | Trocar senha, ativar o Windows Hello, duração padrão, estado das camadas e *Desativar e sair*. |
+
+## 📲 Telegram
+
+Opcional e desligado por padrão. Serve para a evidência existir fora do computador e para uma segunda pessoa acompanhar.
+
+1. No Telegram, abra o **@BotFather**, envie `/newbot` e copie o token.
+2. No Porteiro, aba **Telegram**, cole o token e confirme com a senha.
+3. Clique em **Parear um chat**: aparece um código de 6 dígitos (vale 5 min, uma vez só). Abra o bot, toque em *Iniciar* e envie o código. Repita com o celular de quem for acompanhar (até 3 chats).
+
+<div align="center">
+<img src="docs/telegram.png" alt="Aba Telegram com o bot conectado, um chat pareado e os alertas" width="70%">
+</div>
+
+| Chega no Telegram | Observação |
+|---|---|
+| Liberação e senha errada | sempre; a **foto da webcam** vai junto se o interruptor estiver ligado |
+| Violações (camada desfeita, app reiniciado, bloqueio por tentativas) | pode ser desligado |
+| Mudança de configuração, troca de senha, encerramento do app, parear ou remover chat | **sempre**: ninguém cala o canal em silêncio |
+
+Os chats pareados mandam `/status` (estado do bloqueio e das camadas) e `/bloquear` (reativa o bloqueio). **Não existe comando que libere.**
+
+- O Porteiro só faz conexões de saída (long polling); não abre porta nem precisa de servidor.
+- Só chats **privados** pareados são atendidos. Grupos e desconhecidos são ignorados; um desconhecido gera no máximo um evento por 10 min.
+- O código de pareamento tem 5 tentativas erradas; depois a janela fecha.
+- Sem internet, os alertas ficam numa fila (até 100, por até 6 h) e saem em ordem quando a conexão volta. A fila fica em `outbox.json` (sem o token), então alertas pendentes saem depois de um reinício; passadas 6 h, o alerta é descartado e o log de eventos continua com ele.
+- Só a foto da webcam é enviada, **nunca a tela**. Bots do Telegram não têm criptografia de ponta a ponta: a foto passa pelos servidores deles.
 
 ## 🧱 Como o bloqueio funciona
 
@@ -66,6 +94,7 @@ O estado vem do disco, então o bloqueio nunca "esquece" ao reiniciar: uma janel
 - Não cobre VPN, proxy, Tor, outro dispositivo, dados móveis nem espelhos dos sites.
 - Navegadores sem política (Opera, Vivaldi…) ficam só com `hosts` e firewall.
 - O Porteiro é dono das chaves de política que lista enquanto bloqueia: o que você já tinha ali é substituído e não é restaurado. Chrome, Edge e Brave passam a mostrar "gerenciado pela sua organização".
+- O Telegram não substitui o cuidado com a conta: quem tiver o token do bot ou o celular pareado vê as fotos. Troque o token no @BotFather se suspeitar, e conecte de novo.
 - Webcam ocupada (chamada de vídeo) ou sem permissão: o evento sai sem foto e o motivo aparece no detalhe.
 - **Windows Hello inclui o PIN do Windows**: com ele ativado, quem souber o PIN da sua conta libera o bloqueio. Use um PIN que só você conheça, ou deixe o Hello desligado.
 - Se o `config.json` for apagado ou corrompido, o app volta ao primeiro uso (sem senha): os sites continuam bloqueados, mas quem estiver no teclado pode definir uma nova senha. O evento fica registrado com foto.
@@ -75,7 +104,8 @@ O estado vem do disco, então o bloqueio nunca "esquece" ao reiniciar: uma janel
 ## 🔐 Segurança e privacidade
 
 - Senha guardada só como hash Argon2id; nunca em log. O Windows Hello é verificado pelo próprio Windows: o Porteiro só recebe "sim" ou "não", nunca o rosto, a digital nem o PIN.
-- Dados (config, eventos, fotos e prints) em `C:\ProgramData\Porteiro`, restritos a SYSTEM e Administradores. Nada sai do computador.
+- Dados (config, eventos, fotos e prints) em `C:\ProgramData\Porteiro`, restritos a SYSTEM e Administradores. Nada sai do computador, exceto o que você ligar no Telegram (texto e foto da webcam).
+- O token do bot fica só em `telegram.json` (e na cópia `telegram.corrupt-*` que sobra se esse arquivo ficar ilegível), na mesma pasta protegida: nunca aparece na interface, no registro, em logs nem em mensagens de erro. Só `https://api.telegram.org` é contatado, e builds de release ignoram `PORTEIRO_TELEGRAM_API` para ninguém redirecionar o token.
 - A interface não tem acesso a arquivos, rede nem shell. Toda ação privilegiada passa por comandos Rust que verificam a senha.
 - Nomes de captura são validados (sem path traversal) e domínios aceitam só letras, números, pontos e hífens antes de ir ao `hosts`, ao registro ou ao `netsh`.
 - Retenção: os 5000 eventos mais recentes; as capturas de eventos descartados são apagadas.
@@ -88,7 +118,7 @@ Requisitos: Rust estável, Bun, WebView2 e Build Tools do Visual Studio.
 ```powershell
 bun install
 bun run lint && bun run typecheck && bun test    # frontend
-cd src-tauri; cargo test --lib                   # backend (78 testes; rode em debug)
+cd src-tauri; cargo test --lib                   # backend (149 testes; rode em debug)
 bun tauri build                                  # release: exige administrador + instalador NSIS
 ```
 
@@ -100,7 +130,9 @@ $env:PORTEIRO_HOSTS_FILE = "$env:TEMP\porteiro-hosts"   # só a camada hosts, re
 cd src-tauri; cargo run --features tauri/custom-protocol
 ```
 
-Com essas variáveis o firewall, o registro e a tarefa agendada não são usados. Elas só valem em builds de debug: o release, que roda elevado, as ignora para que um processo comum não consiga apontá-lo para uma configuração nova com a senha padrão.
+Com essas variáveis o firewall, o registro e a tarefa agendada não são usados. Elas só valem em builds de debug: o release, que roda elevado, as ignora para que um processo comum não consiga apontá-lo para uma configuração nova, sem senha.
+
+`PORTEIRO_TELEGRAM_API=http://127.0.0.1:PORTA` (também só em debug) aponta o bot para um Telegram falso local, o que permite testar o pareamento e os alertas sem rede.
 
 Smoke do hardware (webcam e tela), gravando em pasta temporária ou em `PORTEIRO_SMOKE_DIR`:
 

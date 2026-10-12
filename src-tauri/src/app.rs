@@ -9,6 +9,7 @@ use crate::{
     layers::{FirewallLayer, HostsLayer, Layer, SysinfoKiller},
     hello::Verifier,
     session,
+    telegram::{self, Bot, HttpBot, Hub},
     watchdog::{Restarter, TaskRestarter},
 };
 use std::{
@@ -32,8 +33,22 @@ fn verifier() -> Arc<dyn Verifier> {
     Arc::new(crate::hello::NoHello)
 }
 
-fn build_core(hello_available: bool) -> Result<Core, String> {
+struct Booted {
+    core: Core,
+    hub: Hub,
+    bot: Arc<dyn Bot>,
+}
+
+fn build_core(hello_available: bool) -> Result<Booted, String> {
     let paths = Paths::resolve();
+    // The Telegram settings sit next to the config, so the directory must exist before the core prepares it.
+    std::fs::create_dir_all(&paths.data).map_err(|e| e.to_string())?;
+    let hub = Hub::load(paths.telegram()).unwrap_or_else(|why| {
+        eprintln!("porteiro: telegram.json: {why}");
+        Hub::detached(paths.telegram(), &why)
+    });
+    let bot: Arc<dyn Bot> = Arc::new(HttpBot::new(telegram::api_base(|k| std::env::var_os(k), cfg!(debug_assertions))));
+    let outbox = telegram::spawn_outbox(bot.clone(), hub.clone(), paths.shots(), paths.outbox());
     let mut layers: Vec<Box<dyn Layer>> = Vec::new();
     // A sandboxed run (PORTEIRO_DATA_DIR / PORTEIRO_HOSTS_FILE) only ever touches its redirected files:
     // the firewall and the registry are real system state and are left out.
@@ -46,7 +61,7 @@ fn build_core(hello_available: bool) -> Result<Core, String> {
         layers.push(Box::new(crate::layers::PolicyLayer(winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE))));
     }
     let manage_watchdog = !cfg!(debug_assertions) && !paths.sandboxed;
-    Core::new(Deps {
+    let core = Core::new(Deps {
         capturer: Box::new(SystemCapturer),
         killer: Box::new(SysinfoKiller),
         clock: Box::new(SystemClock::new()),
@@ -55,7 +70,10 @@ fn build_core(hello_available: bool) -> Result<Core, String> {
         restarter: manage_watchdog.then(|| Box::new(TaskRestarter) as Box<dyn Restarter>),
         layers,
         paths,
-    })
+        telegram: hub.clone(),
+        notifier: Some(telegram::notifier(hub.clone(), outbox)),
+    })?;
+    Ok(Booted { core, hub, bot })
 }
 
 fn show_main(app: &AppHandle) {
@@ -98,9 +116,12 @@ pub fn run() {
         }))
         .setup(move |app| {
             let hello = verifier();
-            let core: Shared = Arc::new(Mutex::new(build_core(hello.available())?));
+            let Booted { core, hub, bot } = build_core(hello.available())?;
+            let core: Shared = Arc::new(Mutex::new(core));
             app.manage(hello);
+            app.manage(bot.clone());
             app.manage(core.clone());
+            telegram::spawn_poller(hub, bot, Arc::new(core.clone()));
             spawn_loops(core);
 
             let open = MenuItem::with_id(app, "open", "Abrir Porteiro", true, None::<&str>)?;
@@ -146,6 +167,12 @@ pub fn run() {
             commands::set_unlock_minutes,
             commands::change_password,
             commands::disable_and_quit,
+            commands::telegram_status,
+            commands::telegram_connect,
+            commands::telegram_pair,
+            commands::telegram_remove_chat,
+            commands::telegram_set_alerts,
+            commands::telegram_disconnect,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the Porteiro app");

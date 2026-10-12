@@ -8,6 +8,8 @@ pub mod capture;
 mod commands;
 pub mod config;
 pub mod core;
+mod core_events;
+mod core_telegram;
 pub mod elevation;
 pub mod enforce;
 pub mod events;
@@ -20,8 +22,11 @@ pub mod policy;
 #[cfg(windows)]
 pub mod policy_reg;
 pub mod session;
+pub mod telegram;
 pub mod watchdog;
 
+#[cfg(test)]
+mod core_telegram_tests;
 #[cfg(test)]
 mod core_tests;
 #[cfg(test)]
