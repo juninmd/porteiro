@@ -22,7 +22,8 @@
 ## ✨ O que faz
 
 - 🔒 **Bloqueado por padrão.** Instagram, Facebook, Twitter/X e WhatsApp saem do ar em qualquer navegador e no app do WhatsApp.
-- 🔑 **Só a senha libera.** Padrão `1406`, trocável. O app avisa enquanto ela não for trocada.
+- 🔑 **Sem senha padrão.** No primeiro uso você escolhe a sua; até lá os sites já ficam bloqueados e nada libera.
+- 🪪 **Windows Hello.** Opcional: rosto, digital ou PIN do Windows liberam no lugar de digitar a senha (Ajustes → Windows Hello).
 - ⏱️ **Liberação com prazo.** De 1 a 240 min; o bloqueio volta sozinho. *Bloquear agora* não pede senha.
 - 📸 **Monitoria.** Cada tentativa (certa ou errada), cada desbloqueio do Windows e cada tentativa de burlar vira um evento com **foto da webcam e print de cada monitor**.
 - 🛡️ **Difícil de fechar.** O botão de fechar só esconde a janela; a única saída é *Desativar e sair*, com senha. Uma tarefa agendada reabre o app em até 1 min.
@@ -37,10 +38,10 @@
 
 | Aba | Para quê |
 |---|---|
-| **Painel** | Digite a senha, escolha a duração e clique em *Liberar*. |
+| **Painel** | Digite a senha (ou use *Liberar com Windows Hello*), escolha a duração e clique em *Liberar*. |
 | **Sites** | Liga e desliga os quatro serviços e adiciona domínios extras. `reddit.com` cobre também `www.reddit.com` e qualquer subdomínio. Toda mudança pede a senha. |
 | **Registro** | Linha do tempo dos eventos, com as evidências (webcam primeiro, depois cada monitor). |
-| **Ajustes** | Trocar senha, duração padrão, estado das camadas e *Desativar e sair*. |
+| **Ajustes** | Trocar senha, ativar o Windows Hello, duração padrão, estado das camadas e *Desativar e sair*. |
 
 ## 🧱 Como o bloqueio funciona
 
@@ -66,12 +67,14 @@ O estado vem do disco, então o bloqueio nunca "esquece" ao reiniciar: uma janel
 - Navegadores sem política (Opera, Vivaldi…) ficam só com `hosts` e firewall.
 - O Porteiro é dono das chaves de política que lista enquanto bloqueia: o que você já tinha ali é substituído e não é restaurado. Chrome, Edge e Brave passam a mostrar "gerenciado pela sua organização".
 - Webcam ocupada (chamada de vídeo) ou sem permissão: o evento sai sem foto e o motivo aparece no detalhe.
+- **Windows Hello inclui o PIN do Windows**: com ele ativado, quem souber o PIN da sua conta libera o bloqueio. Use um PIN que só você conheça, ou deixe o Hello desligado.
+- Se o `config.json` for apagado ou corrompido, o app volta ao primeiro uso (sem senha): os sites continuam bloqueados, mas quem estiver no teclado pode definir uma nova senha. O evento fica registrado com foto.
 - Senha de 4 dígitos é fraca contra quem tem acesso ao disco. Há bloqueio progressivo (5 erros → 30 s, dobrando até 1 h, mantido ao reiniciar), mas troque por algo maior.
 - Um arquivo `hosts` que não seja UTF-8 não é reescrito; a camada aparece com erro no Painel.
 
 ## 🔐 Segurança e privacidade
 
-- Senha guardada só como hash Argon2id; nunca em log.
+- Senha guardada só como hash Argon2id; nunca em log. O Windows Hello é verificado pelo próprio Windows: o Porteiro só recebe "sim" ou "não", nunca o rosto, a digital nem o PIN.
 - Dados (config, eventos, fotos e prints) em `C:\ProgramData\Porteiro`, restritos a SYSTEM e Administradores. Nada sai do computador.
 - A interface não tem acesso a arquivos, rede nem shell. Toda ação privilegiada passa por comandos Rust que verificam a senha.
 - Nomes de captura são validados (sem path traversal) e domínios aceitam só letras, números, pontos e hífens antes de ir ao `hosts`, ao registro ou ao `netsh`.
@@ -85,7 +88,7 @@ Requisitos: Rust estável, Bun, WebView2 e Build Tools do Visual Studio.
 ```powershell
 bun install
 bun run lint && bun run typecheck && bun test    # frontend
-cd src-tauri; cargo test --lib                   # backend (70 testes; rode em debug)
+cd src-tauri; cargo test --lib                   # backend (78 testes; rode em debug)
 bun tauri build                                  # release: exige administrador + instalador NSIS
 ```
 

@@ -8,7 +8,9 @@ export type Status = {
   unlock_remaining_secs: number | null;
   lockout_secs: number | null;
   elevated: boolean;
-  default_password: boolean;
+  needs_setup: boolean;
+  hello_available: boolean;
+  hello_enabled: boolean;
   layers: LayerStatus[];
   services: ServiceInfo[];
   custom_domains: string[];
@@ -34,3 +36,6 @@ export type EventKind =
   | "quit";
 
 export type LogEvent = { id: string; at_ms: number; kind: EventKind; detail: string; shots: string[] };
+
+/** What the webview offers for a privileged action: the password, or a yes from Windows Hello. */
+export type Credential = { kind: "password"; password: string } | { kind: "hello" };

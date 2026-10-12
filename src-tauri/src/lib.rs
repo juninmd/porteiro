@@ -13,6 +13,7 @@ pub mod enforce;
 pub mod events;
 pub mod evidence;
 pub mod firewall;
+pub mod hello;
 pub mod hosts;
 pub mod layers;
 pub mod policy;

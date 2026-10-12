@@ -74,7 +74,7 @@ function ChangePassword({ onStatus }: { onStatus: (s: Status) => void }) {
 }
 
 export function Settings({ status, onStatus }: { status: Status; onStatus: (s: Status) => void }) {
-  const { ask, dialog } = usePasswordPrompt((s) => s && onStatus(s));
+  const { ask, dialog } = usePasswordPrompt((s) => s && onStatus(s), status.hello_enabled);
 
   return (
     <div className="space-y-10">
@@ -83,6 +83,37 @@ export function Settings({ status, onStatus }: { status: Status; onStatus: (s: S
           Senha
         </h2>
         <ChangePassword onStatus={onStatus} />
+      </section>
+
+      <section aria-labelledby="hello-section">
+        <h2 id="hello-section" className="mb-3 text-lg font-semibold">
+          Windows Hello
+        </h2>
+        {status.hello_available ? (
+          <>
+            <p className="mb-3 text-sm text-mute">
+              {status.hello_enabled
+                ? "Ativado: rosto, digital ou PIN do Windows também liberam o bloqueio. A senha continua valendo."
+                : "Libere com rosto, digital ou PIN do Windows em vez de digitar a senha. A senha continua valendo."}{" "}
+              O PIN do Windows passa a liberar também; use um que só você conheça.
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                ask({
+                  title: status.hello_enabled ? "Desativar o Windows Hello" : "Ativar o Windows Hello",
+                  hint: status.hello_enabled ? undefined : "Depois da senha, o Windows vai pedir a sua verificação.",
+                  run: (auth) => api.setHello(auth, !status.hello_enabled),
+                })
+              }
+              className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-raised"
+            >
+              {status.hello_enabled ? "Desativar Windows Hello" : "Ativar Windows Hello"}
+            </button>
+          </>
+        ) : (
+          <p className="text-sm text-mute">O Windows Hello não está configurado neste PC.</p>
+        )}
       </section>
 
       <section aria-labelledby="dur-section">
@@ -99,7 +130,7 @@ export function Settings({ status, onStatus }: { status: Status; onStatus: (s: S
             const minutes = Number(e.target.value);
             ask({
               title: `Liberar por ${minutes} min por padrão`,
-              run: (password) => api.setUnlockMinutes(password, minutes),
+              run: (auth) => api.setUnlockMinutes(auth, minutes),
             });
           }}
           className="rounded-lg border border-line bg-bg px-3 py-2 text-base text-ink"
@@ -144,7 +175,7 @@ export function Settings({ status, onStatus }: { status: Status; onStatus: (s: S
             ask({
               title: "Desativar a proteção e sair",
               hint: "O Porteiro será encerrado e o bloqueio removido.",
-              run: (password) => api.disableAndQuit(password),
+              run: (auth) => api.disableAndQuit(auth),
             })
           }
           className="mt-4 rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-danger hover:bg-danger/10"
