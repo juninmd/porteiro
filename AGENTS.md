@@ -5,7 +5,7 @@ Tauri 2 (Rust) + React 19 + Tailwind v4 + Vite, Bun, Biome. Windows only.
 
 ## Layout
 - `src/` — UI (pt-BR). `api.ts` is the only place that calls `invoke`; `types.ts` mirrors the Rust JSON (snake_case).
-- `src-tauri/src/` — `core.rs` (state machine), `enforce.rs` (tick/drift/apply), `admin.rs` (password-gated config), `layers.rs` + `hosts.rs`/`policy*.rs`/`firewall.rs` (OS layers), `capture.rs` + `evidence.rs` (webcam/screen on a worker thread), `session.rs` (Windows lock/unlock), `watchdog.rs` (scheduled task), `commands.rs`/`app.rs` (Tauri wiring).
+- `src-tauri/src/` — `core.rs` (state machine), `enforce.rs` (tick/drift/apply), `admin.rs` (password-gated config), `layers.rs` + `hosts.rs`/`policy*.rs`/`firewall.rs` (OS layers), `capture.rs` + `evidence.rs` (webcam/screen on a worker thread), `session.rs` (Windows lock/unlock), `watchdog.rs` (scheduled task), `commands.rs`/`app.rs` (Tauri wiring), `core_events.rs` (event trail), `core_telegram.rs` + `telegram/` (alerts, pairing, `/status` and `/bloquear`: `hub` state, `outbox` delivery queue, `poller` incoming, `http` Bot API client behind the `Bot` trait).
 - OS access is injected (`Layer`, `Capturer`, `AppKiller`, `Clock`) so `core_tests.rs` runs with fakes.
 
 ## Commands
@@ -21,4 +21,9 @@ Tauri 2 (Rust) + React 19 + Tailwind v4 + Vite, Bun, Biome. Windows only.
 - `disable_and_quit` removes the restart task before lifting any layer: a failure must leave the block intact.
 - `Core::new` builds the event log and the evidence worker together so they share one lock; do not pass in a second `EventLog`.
 - Failing closed: unreadable state means locked; a persisted window is honoured only within the maximum length.
+- Telegram settings change only through `Core::telegram_*` (all behind `authorize`/`verify`). The bot token lives only in `telegram.json` (plus the `telegram.corrupt-*` copy kept aside if that file is ever unreadable), inside the protected data dir: never in `Status`/`View`, events, logs, `Debug` output or error text (`HttpBot` scrubs it), and `valid_token` runs before it is put in a URL.
+- Alert recipients are fixed when the event is born (`Core::born`), not when its evidence finishes, and changes that remove recipients are logged before they are applied. Changes to protection (`ConfigChange`, `PasswordChange`, `Quit`) are always announced; only violations can be switched off.
+- Only the webcam frame is ever sent, never a screen capture. The poller serves private paired chats only and has no command that unlocks.
+- `PORTEIRO_TELEGRAM_API` is honoured in debug builds only (`api_base`); release must ignore it.
+- `ureq` needs the `native-tls` feature (`native-tls-no-default` compiles the connector out and https panics; `the_tls_setup_does_not_panic_on_the_first_https_handshake` pins it). Trust comes from the Windows store (`RootCerts::PlatformVerifier`, pinned by a test) so a corporate proxy's CA works. `live_https_*` (`--ignored`) checks the real Telegram.
 - Do not apply the data-dir ACL when not elevated: an unelevated admin token would lock the developer out.

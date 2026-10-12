@@ -5,12 +5,14 @@ import { Settings } from "./components/Settings";
 import { Setup } from "./components/Setup";
 import { Sites } from "./components/Sites";
 import { StatusPanel } from "./components/StatusPanel";
+import { Telegram } from "./components/Telegram";
 import { useStatus } from "./hooks";
 
 const TABS = [
   { id: "home", label: "Painel" },
   { id: "sites", label: "Sites" },
   { id: "log", label: "Registro" },
+  { id: "telegram", label: "Telegram" },
   { id: "settings", label: "Ajustes" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -62,6 +64,7 @@ export default function App() {
         {!status.needs_setup && tab === "home" && <StatusPanel status={status} onStatus={apply} />}
         {!status.needs_setup && tab === "sites" && <Sites status={status} onStatus={apply} />}
         {!status.needs_setup && tab === "log" && <Events eventCount={status.event_count} />}
+        {!status.needs_setup && tab === "telegram" && <Telegram helloEnabled={status.hello_enabled} />}
         {!status.needs_setup && tab === "settings" && <Settings status={status} onStatus={apply} />}
       </main>
     </div>

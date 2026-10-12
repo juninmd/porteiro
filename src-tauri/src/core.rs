@@ -5,11 +5,11 @@ use crate::{
     auth::{self, Proof, Throttle},
     blocklist::{self, Blocklist},
     config::{self, Config, Loaded, Paths, State, MAX_UNLOCK_MINUTES},
-    events::{Event, EventLog, Kind},
+    events::{EventLog, Kind},
     capture::Capturer,
-    evidence::Evidence,
+    evidence::{Evidence, Notifier},
     layers::{AppKiller, Layer},
-    session::Transition,
+    telegram::Hub,
     watchdog::Restarter,
 };
 use std::collections::HashMap;
@@ -31,6 +31,9 @@ pub struct Deps {
     pub restarter: Option<Box<dyn Restarter>>,
     /// Whether Windows Hello can be offered on this machine (read once at start).
     pub hello_available: bool,
+    pub telegram: Hub,
+    /// Decides who hears about each event; `None` in tests that do not care.
+    pub notifier: Option<Notifier>,
 }
 
 pub struct Core {
@@ -53,6 +56,8 @@ pub struct Core {
     pub(crate) last_enforcement_error: Option<String>,
     pub(crate) restarter: Option<Box<dyn Restarter>>,
     pub(crate) hello_available: bool,
+    pub(crate) telegram: Hub,
+    pub(crate) notifier: Option<Notifier>,
     /// Set once the user chose to disable protection: ticks stop re-locking while the process winds down.
     pub(crate) disabled: bool,
     pub(crate) watchdog_ok: Option<bool>,
@@ -61,7 +66,7 @@ pub struct Core {
 
 impl Core {
     pub fn new(deps: Deps) -> Result<Core, String> {
-        let Deps { paths, layers, capturer, killer, clock, elevated, restarter, hello_available } = deps;
+        let Deps { paths, layers, capturer, killer, clock, elevated, restarter, hello_available, telegram, notifier } = deps;
         if let Err(e) = config::prepare_data_dir(&paths, elevated) {
             eprintln!("porteiro: could not prepare {}: {e}", paths.data.display());
         }
@@ -90,6 +95,8 @@ impl Core {
             last_enforcement_error: None,
             restarter,
             hello_available,
+            telegram,
+            notifier,
             disabled: false,
             watchdog_ok: None,
             watchdog_checked: None,
@@ -102,6 +109,9 @@ impl Core {
         core.log(Kind::AppStart, if elevated { "app iniciado" } else { "app iniciado SEM administrador: o bloqueio não é aplicado" }, false);
         if cfg_reset {
             core.log(Kind::Tamper, "config.json ilegível: restaurada sem senha (nova configuração necessária)", false);
+        }
+        if let Some(note) = core.telegram.take_startup_note() {
+            core.log(Kind::Tamper, note, false);
         }
         core.tick();
         Ok(core)
@@ -155,30 +165,6 @@ impl Core {
             watchdog: self.watchdog_ok,
             event_count: self.events.count(),
             data_dir: self.paths.data.display().to_string(),
-        }
-    }
-
-    pub fn list_events(&self, offset: usize, limit: usize) -> Vec<Event> {
-        self.events.list(offset, limit)
-    }
-
-    pub fn shots_dir(&self) -> std::path::PathBuf {
-        self.paths.shots()
-    }
-
-    /// Records an event. With `capture`, screen and webcam evidence is attached by the worker thread.
-    pub(crate) fn log(&mut self, kind: Kind, detail: impl Into<String>, capture: bool) {
-        let event = Event { id: uuid::Uuid::new_v4().to_string(), at_ms: self.clock.wall_ms(), kind, detail: detail.into(), shots: Vec::new() };
-        let event = if capture {
-            match self.evidence.submit(event) {
-                Ok(()) => return,
-                Err(back) => back,
-            }
-        } else {
-            event
-        };
-        if let Err(e) = self.events.append(&event) {
-            eprintln!("porteiro: could not record event: {e}");
         }
     }
 
@@ -281,22 +267,22 @@ impl Core {
 
     /// Locking never needs a password.
     pub fn relock(&mut self) -> Status {
-        if self.deadline.take().is_some() {
-            self.st.unlocked_until = None;
-            self.save_state();
-            self.log(Kind::Relock, "bloqueio reativado manualmente", false);
-            self.applied = None;
-            self.retry_at = 0;
-            self.tick();
-        }
+        self.relock_via("manualmente");
         self.status()
     }
 
-    pub fn session_event(&mut self, t: Transition) {
-        match t {
-            Transition::Unlocked => self.log(Kind::SessionUnlock, "Windows desbloqueado", true),
-            Transition::Locked => self.log(Kind::SessionLock, "Windows bloqueado", false),
+    /// True when a window was open. `origin` says who asked, for the event trail.
+    pub fn relock_via(&mut self, origin: &str) -> bool {
+        if self.deadline.take().is_none() {
+            return false;
         }
+        self.st.unlocked_until = None;
+        self.save_state();
+        self.log(Kind::Relock, format!("bloqueio reativado {origin}"), false);
+        self.applied = None;
+        self.retry_at = 0;
+        self.tick();
+        true
     }
 
     pub(crate) fn begin_disable(&mut self) {
@@ -308,10 +294,5 @@ impl Core {
 
     pub(crate) fn watchdog_managed(&self) -> bool {
         self.restarter.is_some() && self.elevated
-    }
-
-    /// Everything queued for capture is on disk before the app lets go of the process.
-    pub fn flush_evidence(&self) {
-        self.evidence.flush();
     }
 }

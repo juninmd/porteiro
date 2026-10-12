@@ -92,6 +92,12 @@ impl Paths {
     pub fn ips(&self) -> PathBuf {
         self.data.join("ips.json")
     }
+    pub fn telegram(&self) -> PathBuf {
+        self.data.join("telegram.json")
+    }
+    pub fn outbox(&self) -> PathBuf {
+        self.data.join("outbox.json")
+    }
 }
 
 /// Atomic replace so a crash never leaves half a JSON file; synced first so a power cut cannot leave it empty

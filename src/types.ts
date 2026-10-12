@@ -37,5 +37,19 @@ export type EventKind =
 
 export type LogEvent = { id: string; at_ms: number; kind: EventKind; detail: string; shots: string[] };
 
+export type TelegramAlerts = { photo_unlock: boolean; photo_fail: boolean; tamper: boolean };
+
+export type TelegramChat = { id: number; name: string };
+
+/** Never carries the bot token: it stays on the Rust side. */
+export type TelegramView = {
+  connected: boolean;
+  bot_username: string | null;
+  chats: TelegramChat[];
+  alerts: TelegramAlerts;
+  pairing: { code: string; secs_left: number } | null;
+  last_error: string | null;
+};
+
 /** What the webview offers for a privileged action: the password, or a yes from Windows Hello. */
 export type Credential = { kind: "password"; password: string } | { kind: "hello" };

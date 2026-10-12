@@ -12,6 +12,11 @@ export function spokenCountdown(totalSecs: number): string {
   return mins <= 1 ? "menos de 1 minuto" : `${mins} minutos`;
 }
 
+/** "482913" -> "482 913": easier to read off the screen and type into Telegram. */
+export function groupCode(code: string): string {
+  return code.replace(/(\d{3})(?=\d)/g, "$1 ");
+}
+
 export function formatWhen(epochMs: number, now: Date = new Date()): string {
   const d = new Date(epochMs);
   const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });

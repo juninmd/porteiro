@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatCountdown, formatWhen, KINDS, orderShots, shotKind, spokenCountdown } from "./format";
+import { formatCountdown, formatWhen, groupCode, KINDS, orderShots, shotKind, spokenCountdown } from "./format";
 
 describe("formatCountdown", () => {
   test("minutes and zero-padded seconds", () => {
@@ -14,6 +14,13 @@ describe("formatCountdown", () => {
   test("spoken form rounds up so it never claims time that is gone", () => {
     expect(spokenCountdown(61)).toBe("2 minutos");
     expect(spokenCountdown(30)).toBe("menos de 1 minuto");
+  });
+});
+
+describe("groupCode", () => {
+  test("splits the six digits in two readable halves", () => {
+    expect(groupCode("482913")).toBe("482 913");
+    expect(groupCode("000007")).toBe("000 007");
   });
 });
 

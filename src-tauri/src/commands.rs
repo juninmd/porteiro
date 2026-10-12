@@ -7,6 +7,7 @@ use crate::{
     core::Core,
     events::Event,
     hello::{Verdict, Verifier},
+    telegram::{self, Alerts, Bot, BotError, View},
 };
 use serde::Deserialize;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -15,6 +16,7 @@ use tauri::{ipc::Response, AppHandle, Manager, State};
 pub type Shared = Arc<Mutex<Core>>;
 pub type CoreState<'a> = State<'a, Shared>;
 pub type HelloState<'a> = State<'a, Arc<dyn Verifier>>;
+pub type BotState<'a> = State<'a, Arc<dyn Bot>>;
 
 pub fn lock(core: &Shared) -> MutexGuard<'_, Core> {
     // A panic elsewhere must not turn into a permanently dead UI; the state itself is re-derivable.
@@ -148,4 +150,60 @@ pub async fn disable_and_quit(app: AppHandle, core: CoreState<'_>, hello: HelloS
     crate::QUIT_AUTHORIZED.store(true, std::sync::atomic::Ordering::SeqCst);
     app.exit(0);
     Ok(())
+}
+
+fn bot_error(e: BotError) -> ApiError {
+    let code = match e {
+        BotError::Unauthorized => "telegram_token_rejected",
+        BotError::Transient(_) | BotError::RetryAfter(_) => "telegram_unreachable",
+        BotError::Rejected(_) => "telegram_error",
+    };
+    ApiError::new(code, e.describe())
+}
+
+#[tauri::command]
+pub async fn telegram_status(core: CoreState<'_>) -> Result<View, ApiError> {
+    Ok(lock(&core).telegram_view())
+}
+
+/// The password is checked before the token goes anywhere, and the check with Telegram runs without the core
+/// lock: it can take seconds and the UI polls the core every second.
+#[tauri::command]
+pub async fn telegram_connect(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, bot: BotState<'_>, auth: Credential, token: String) -> Result<View, ApiError> {
+    let token = token.trim().to_string();
+    if !telegram::valid_token(&token) {
+        return Err(ApiError::new("telegram_token_invalid", "token inválido: copie-o inteiro do @BotFather"));
+    }
+    let proof = prove(&app, &core, &hello, auth, "conectar o Telegram").await?;
+    let verified = lock(&core).verify(proof, "conectar o Telegram")?;
+    let (client, probe) = (bot.inner().clone(), token.clone());
+    let me = tauri::async_runtime::spawn_blocking(move || client.get_me(&probe))
+        .await
+        .map_err(|e| ApiError::new("internal", format!("falha ao falar com o Telegram: {e}")))?
+        .map_err(bot_error)?;
+    lock(&core).telegram_connect(verified, &token, &me.username)
+}
+
+#[tauri::command]
+pub async fn telegram_pair(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential) -> Result<View, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "parear um chat do Telegram").await?;
+    lock(&core).telegram_pair(proof)
+}
+
+#[tauri::command]
+pub async fn telegram_remove_chat(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential, chat: i64) -> Result<View, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "remover um chat do Telegram").await?;
+    lock(&core).telegram_remove_chat(proof, chat)
+}
+
+#[tauri::command]
+pub async fn telegram_set_alerts(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential, alerts: Alerts) -> Result<View, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "mudar os alertas do Telegram").await?;
+    lock(&core).telegram_set_alerts(proof, alerts)
+}
+
+#[tauri::command]
+pub async fn telegram_disconnect(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential) -> Result<View, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "desconectar o Telegram").await?;
+    lock(&core).telegram_disconnect(proof)
 }

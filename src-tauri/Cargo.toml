@@ -22,6 +22,9 @@ serde_json = "1.0.153"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 tauri = { version = "2.12.3", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.5.3"
+# Windows TLS stack (SChannel) and system trust store; no extra crypto library to ship. `native-tls-no-default`
+# compiles the connector out (https then panics), so the full feature it is; its bundled roots stay unused.
+ureq = { version = "3.4.2", default-features = false, features = ["native-tls"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 xcap = "0.9.8"
 
