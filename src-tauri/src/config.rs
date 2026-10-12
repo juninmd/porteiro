@@ -1,5 +1,5 @@
 //! Persisted settings and runtime state. Both live in the data dir, which is locked to SYSTEM and Administrators.
-use crate::{auth, blocklist};
+use crate::blocklist;
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsString,
@@ -9,14 +9,15 @@ use std::{
     process::Command,
 };
 
-pub const DEFAULT_PASSWORD: &str = "1406";
 pub const MAX_UNLOCK_MINUTES: u32 = 240;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
-    pub password_hash: String,
-    /// True until the user changes the password; the UI nags while it is.
-    pub default_password: bool,
+    /// `None` until the first run: there is no default password, and nothing can be unlocked before one is set.
+    pub password_hash: Option<String>,
+    /// Windows Hello may stand in for the password once the user turned it on.
+    #[serde(default)]
+    pub hello: bool,
     pub enabled_services: Vec<String>,
     pub custom_domains: Vec<String>,
     pub unlock_minutes: u32,
@@ -25,8 +26,8 @@ pub struct Config {
 impl Config {
     pub fn fresh() -> Result<Config, String> {
         Ok(Config {
-            password_hash: auth::hash(DEFAULT_PASSWORD)?,
-            default_password: true,
+            password_hash: None,
+            hello: false,
             enabled_services: blocklist::default_enabled(),
             custom_domains: Vec::new(),
             unlock_minutes: 15,
@@ -94,7 +95,7 @@ impl Paths {
 }
 
 /// Atomic replace so a crash never leaves half a JSON file; synced first so a power cut cannot leave it empty
-/// (an empty config is read as damaged and falls back to the default password).
+/// (an empty config is read as damaged and starts over without a password).
 pub fn write_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
     let tmp = path.with_extension("tmp");
     let mut file = fs::File::create(&tmp)?;
@@ -169,10 +170,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fresh_config_uses_the_default_password_hashed_and_all_services() {
+    fn a_fresh_config_has_no_password_and_all_services() {
         let c = Config::fresh().unwrap();
-        assert!(c.default_password && auth::verify(&c.password_hash, DEFAULT_PASSWORD));
-        assert!(!c.password_hash.contains(DEFAULT_PASSWORD));
+        assert!(c.password_hash.is_none() && !c.hello);
         assert_eq!(c.enabled_services, blocklist::default_enabled());
     }
 

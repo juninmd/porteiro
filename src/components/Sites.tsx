@@ -5,7 +5,7 @@ import { usePasswordPrompt } from "./PasswordDialog";
 
 export function Sites({ status, onStatus }: { status: Status; onStatus: (s: Status) => void }) {
   const [domain, setDomain] = useState("");
-  const { ask, dialog } = usePasswordPrompt((s) => s && onStatus(s));
+  const { ask, dialog } = usePasswordPrompt((s) => s && onStatus(s), status.hello_enabled);
 
   const add = (e: FormEvent) => {
     e.preventDefault();
@@ -13,8 +13,8 @@ export function Sites({ status, onStatus }: { status: Status; onStatus: (s: Stat
     if (!value) return;
     ask({
       title: `Bloquear ${value}`,
-      run: async (password) => {
-        const next = await api.addDomain(password, value);
+      run: async (auth) => {
+        const next = await api.addDomain(auth, value);
         setDomain("");
         return next;
       },
@@ -46,7 +46,7 @@ export function Sites({ status, onStatus }: { status: Status; onStatus: (s: Stat
                   ask({
                     title: s.enabled ? `Liberar ${s.name} em definitivo` : `Bloquear ${s.name}`,
                     hint: s.enabled ? "Este serviço deixa de ser bloqueado, mesmo sem janela de liberação." : undefined,
-                    run: (password) => api.setService(password, s.id, !s.enabled),
+                    run: (auth) => api.setService(auth, s.id, !s.enabled),
                   })
                 }
                 className={`relative h-6 w-11 rounded-full transition-colors motion-reduce:transition-none ${s.enabled ? "bg-amber" : "bg-line"}`}
@@ -93,7 +93,7 @@ export function Sites({ status, onStatus }: { status: Status; onStatus: (s: Stat
                 <span>{d}</span>
                 <button
                   type="button"
-                  onClick={() => ask({ title: `Remover ${d}`, run: (password) => api.removeDomain(password, d) })}
+                  onClick={() => ask({ title: `Remover ${d}`, run: (auth) => api.removeDomain(auth, d) })}
                   className="rounded-md px-3 py-1 text-sm text-danger hover:bg-raised"
                   aria-label={`Remover ${d}`}
                 >

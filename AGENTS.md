@@ -13,7 +13,8 @@ Tauri 2 (Rust) + React 19 + Tailwind v4 + Vite, Bun, Biome. Windows only.
 - Release build needs admin (manifest); debug does not. Never `cargo test --release`.
 
 ## Rules that must not regress
-- Every config change and unlock goes through `Core::authorize` (throttle + evidence on failure).
+- Every config change and unlock goes through `Core::authorize` (throttle + evidence on failure). There is no default password: unconfigured means locked with `setup_required`.
+- Windows Hello is verified in `commands.rs` without the core lock; a Hello refusal goes through `Core::hello_failed` like a wrong password, a cancelled prompt is not an attempt.
 - Anything user-supplied that reaches hosts, the registry or `netsh` passes `blocklist::validate_domain` first.
 - Sandboxed runs (`PORTEIRO_DATA_DIR` / `PORTEIRO_HOSTS_FILE`) must never touch the real firewall, registry or scheduled task, and release builds must ignore those variables (`Paths::from_env`).
 - An open unlock window records the wall clock (`seen_wall`); a restart behind it is tampering, so it relocks.

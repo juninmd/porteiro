@@ -2,7 +2,7 @@
 //! Everything touching the OS is injected, so the rules here are tested with fakes.
 use crate::{
     api::{ApiError, Clock, LayerStatus, ServiceInfo, Status},
-    auth::{self, Throttle},
+    auth::{self, Proof, Throttle},
     blocklist::{self, Blocklist},
     config::{self, Config, Loaded, Paths, State, MAX_UNLOCK_MINUTES},
     events::{Event, EventLog, Kind},
@@ -29,6 +29,8 @@ pub struct Deps {
     pub elevated: bool,
     /// The restart task; `Some` only for release builds outside any sandbox.
     pub restarter: Option<Box<dyn Restarter>>,
+    /// Whether Windows Hello can be offered on this machine (read once at start).
+    pub hello_available: bool,
 }
 
 pub struct Core {
@@ -50,6 +52,7 @@ pub struct Core {
     pub(crate) last_blocked_app: HashMap<String, u64>,
     pub(crate) last_enforcement_error: Option<String>,
     pub(crate) restarter: Option<Box<dyn Restarter>>,
+    pub(crate) hello_available: bool,
     /// Set once the user chose to disable protection: ticks stop re-locking while the process winds down.
     pub(crate) disabled: bool,
     pub(crate) watchdog_ok: Option<bool>,
@@ -58,7 +61,7 @@ pub struct Core {
 
 impl Core {
     pub fn new(deps: Deps) -> Result<Core, String> {
-        let Deps { paths, layers, capturer, killer, clock, elevated, restarter } = deps;
+        let Deps { paths, layers, capturer, killer, clock, elevated, restarter, hello_available } = deps;
         if let Err(e) = config::prepare_data_dir(&paths, elevated) {
             eprintln!("porteiro: could not prepare {}: {e}", paths.data.display());
         }
@@ -86,6 +89,7 @@ impl Core {
             last_blocked_app: HashMap::new(),
             last_enforcement_error: None,
             restarter,
+            hello_available,
             disabled: false,
             watchdog_ok: None,
             watchdog_checked: None,
@@ -97,7 +101,7 @@ impl Core {
         core.restore_window(mono, wall);
         core.log(Kind::AppStart, if elevated { "app iniciado" } else { "app iniciado SEM administrador: o bloqueio não é aplicado" }, false);
         if cfg_reset {
-            core.log(Kind::Tamper, "config.json ilegível: restaurada com a senha padrão", false);
+            core.log(Kind::Tamper, "config.json ilegível: restaurada sem senha (nova configuração necessária)", false);
         }
         core.tick();
         Ok(core)
@@ -138,7 +142,9 @@ impl Core {
             unlock_remaining_secs: self.remaining(),
             lockout_secs: self.throttle.check(now).err(),
             elevated: self.elevated,
-            default_password: self.cfg.default_password,
+            needs_setup: self.cfg.password_hash.is_none(),
+            hello_available: self.hello_available,
+            hello_enabled: self.cfg.hello,
             layers: self.report.clone(),
             services: blocklist::SERVICES
                 .iter()
@@ -190,26 +196,53 @@ impl Core {
         Ok(())
     }
 
-    /// Verifies the password under the lockout policy. Wrong guesses are logged with evidence.
-    pub(crate) fn authorize(&mut self, password: &str, action: &str) -> Result<(), ApiError> {
-        let now = self.clock.mono();
-        if let Err(wait) = self.throttle.check(now) {
+    /// Checks the lockout and that the proof can work at all, without consuming an attempt. The command layer
+    /// calls it before it opens a Windows Hello prompt.
+    pub fn precheck(&self, proof: &Proof) -> Result<(), ApiError> {
+        if self.cfg.password_hash.is_none() {
+            return Err(ApiError::new("setup_required", "defina uma senha antes de usar o Porteiro"));
+        }
+        if matches!(proof, Proof::Hello) && !self.cfg.hello {
+            return Err(ApiError::new("hello_disabled", "o Windows Hello não está ativado no Porteiro"));
+        }
+        if let Err(wait) = self.throttle.check(self.clock.mono()) {
             let mut e = ApiError::new("locked_out", format!("muitas tentativas: aguarde {wait} s"));
             e.retry_after = Some(wait);
             return Err(e);
         }
-        if auth::verify(&self.cfg.password_hash, password) {
+        Ok(())
+    }
+
+    /// Verifies the proof under the lockout policy. Failed attempts are logged with evidence.
+    pub(crate) fn authorize(&mut self, proof: impl Into<Proof>, action: &str) -> Result<(), ApiError> {
+        let proof = proof.into();
+        self.precheck(&proof)?;
+        let ok = match &proof {
+            Proof::Password(p) => self.cfg.password_hash.as_deref().is_some_and(|h| auth::verify(h, p)),
+            Proof::Hello => true,
+        };
+        if ok {
             self.throttle.succeed();
             self.st.failures = 0;
             self.save_state();
             return Ok(());
         }
+        Err(self.failed_attempt(action, "senha incorreta", "wrong_password"))
+    }
+
+    /// Windows Hello said no: the same trail and lockout as a wrong password.
+    pub fn hello_failed(&mut self, action: &str, why: &str) -> ApiError {
+        self.failed_attempt(action, &format!("Windows Hello recusou ({why})"), "hello_failed")
+    }
+
+    fn failed_attempt(&mut self, action: &str, what: &str, code: &'static str) -> ApiError {
+        let now = self.clock.mono();
         let started_lockout = self.throttle.fail(now);
         self.st.failures = self.throttle.failures();
         self.save_state();
         let left = self.throttle.attempts_left();
-        self.log(Kind::AuthFail, format!("senha incorreta ao {action} ({left} tentativas restantes)"), true);
-        let mut e = ApiError::new("wrong_password", "senha incorreta");
+        self.log(Kind::AuthFail, format!("{what} ao {action} ({left} tentativas restantes)"), true);
+        let mut e = ApiError::new(code, what.to_string());
         e.attempts_left = Some(left);
         if let Some(wait) = started_lockout {
             self.log(Kind::Lockout, format!("{} falhas seguidas: bloqueado por {wait} s", self.throttle.failures()), false);
@@ -217,11 +250,25 @@ impl Core {
             e.message = format!("muitas tentativas: aguarde {wait} s");
             e.retry_after = Some(wait);
         }
-        Err(e)
+        e
     }
 
-    pub fn unlock(&mut self, password: &str, minutes: Option<u32>) -> Result<Status, ApiError> {
-        self.authorize(password, "liberar o acesso")?;
+    /// First run only: there is no default password, so the owner chooses one before anything can be unlocked.
+    pub fn setup_password(&mut self, password: &str) -> Result<Status, ApiError> {
+        if self.cfg.password_hash.is_some() {
+            return Err(ApiError::new("already_configured", "já existe uma senha"));
+        }
+        auth::validate_new_password(password).map_err(|code| {
+            ApiError::new(code, if code == "password_too_short" { "use ao menos 4 caracteres" } else { "senha longa demais" })
+        })?;
+        self.cfg.password_hash = Some(auth::hash(password).map_err(|e| ApiError::new("internal", e))?);
+        self.save_config()?;
+        self.log(Kind::PasswordChange, "senha definida", true);
+        Ok(self.status())
+    }
+
+    pub fn unlock(&mut self, proof: impl Into<Proof>, minutes: Option<u32>) -> Result<Status, ApiError> {
+        self.authorize(proof, "liberar o acesso")?;
         let minutes = minutes.unwrap_or(self.cfg.unlock_minutes).clamp(1, MAX_UNLOCK_MINUTES);
         self.deadline = Some(self.clock.mono() + u64::from(minutes) * 60);
         self.st.unlocked_until = Some(self.clock.wall() + i64::from(minutes) * 60);
