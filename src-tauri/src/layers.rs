@@ -116,6 +116,9 @@ impl FirewallLayer {
     }
 
     fn delete_all(&self) {
+        for del in firewall::delete_dot_args() {
+            let _ = (self.netsh)(&del);
+        }
         // Sweep past the known count too: rules from a previous, larger IP set may still exist.
         for i in 0..(firewall::rule_count(&self.ips) + 8).max(8) {
             let _ = (self.netsh)(&firewall::delete_args(i));
@@ -134,6 +137,9 @@ impl Layer for FirewallLayer {
         self.delete_all();
         if !locked {
             return Ok(());
+        }
+        for dot in firewall::dot_args() {
+            let _ = (self.netsh)(&dot);
         }
         let fresh = (self.resolve)(&bl.hosts, Duration::from_secs(4));
         // Addresses learned for a host that is no longer blocked must stop being blocked with it.

@@ -11,6 +11,15 @@ use std::{
 
 pub const MAX_UNLOCK_MINUTES: u32 = 240;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ScheduleConfig {
+    pub enabled: bool,
+    pub start_hour: u8,
+    pub end_hour: u8,
+    #[serde(default)]
+    pub days: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     /// `None` until the first run: there is no default password, and nothing can be unlocked before one is set.
@@ -20,7 +29,11 @@ pub struct Config {
     pub hello: bool,
     pub enabled_services: Vec<String>,
     pub custom_domains: Vec<String>,
+    #[serde(default)]
+    pub custom_apps: Vec<String>,
     pub unlock_minutes: u32,
+    #[serde(default)]
+    pub schedule: Option<ScheduleConfig>,
 }
 
 impl Config {
@@ -30,7 +43,9 @@ impl Config {
             hello: false,
             enabled_services: blocklist::default_enabled(),
             custom_domains: Vec::new(),
+            custom_apps: Vec::new(),
             unlock_minutes: 15,
+            schedule: None,
         })
     }
 }

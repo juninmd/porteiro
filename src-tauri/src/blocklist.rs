@@ -61,6 +61,50 @@ pub const SERVICES: &[Service] = &[
         ],
         apps: &["WhatsApp.exe", "WhatsApp.Root.exe"],
     },
+    Service {
+        id: "tiktok",
+        name: "TikTok",
+        domains: &["tiktok.com"],
+        extra_hosts: &["www.tiktok.com", "v16-webapp-prime.tiktok.com", "api.tiktokv.com"],
+        apps: &[],
+    },
+    Service {
+        id: "reddit",
+        name: "Reddit",
+        domains: &["reddit.com", "redd.it"],
+        extra_hosts: &["www.reddit.com", "old.reddit.com", "oauth.reddit.com"],
+        apps: &[],
+    },
+    Service {
+        id: "youtube",
+        name: "YouTube",
+        domains: &["youtube.com", "youtu.be"],
+        extra_hosts: &["www.youtube.com", "m.youtube.com", "i.ytimg.com"],
+        apps: &[],
+    },
+    Service {
+        id: "bets",
+        name: "Apostas / Bets",
+        domains: &["bet365.com", "betano.com", "blaze.com", "sportingbet.com", "betfair.com", "kto.com", "estrela.bet", "stake.com"],
+        extra_hosts: &["www.bet365.com", "br.betano.com", "blaze.com"],
+        apps: &[],
+    },
+    Service {
+        id: "discord",
+        name: "Discord",
+        domains: &["discord.com", "discord.gg", "discordapp.com"],
+        extra_hosts: &["gateway.discord.gg", "cdn.discordapp.com"],
+        apps: &["Discord.exe"],
+    },
+];
+
+pub const DOH_HOSTS: &[&str] = &[
+    "cloudflare-dns.com",
+    "dns.google",
+    "dns.quad9.net",
+    "doh.opendns.com",
+    "dns.adguard-dns.com",
+    "dns.nextdns.io",
 ];
 
 const PREFIXES: &[&str] = &["", "www.", "m.", "mobile.", "web.", "api."];
@@ -74,11 +118,13 @@ pub struct Blocklist {
     pub apps: Vec<String>,
 }
 
+pub const DEFAULT_ENABLED_IDS: &[&str] = &["instagram", "facebook", "twitter", "whatsapp"];
+
 pub fn default_enabled() -> Vec<String> {
-    SERVICES.iter().map(|s| s.id.to_string()).collect()
+    DEFAULT_ENABLED_IDS.iter().map(|s| s.to_string()).collect()
 }
 
-pub fn build(enabled: &[String], custom: &[String]) -> Blocklist {
+pub fn build(enabled: &[String], custom: &[String], custom_apps: &[String]) -> Blocklist {
     let (mut domains, mut named, mut apps) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
     for s in SERVICES.iter().filter(|s| enabled.iter().any(|e| e == s.id)) {
         domains.extend(s.domains.iter().map(|d| d.to_string()));
@@ -89,6 +135,8 @@ pub fn build(enabled: &[String], custom: &[String]) -> Blocklist {
         }
     }
     domains.extend(custom.iter().cloned());
+    apps.extend(custom_apps.iter().cloned());
+    named.extend(DOH_HOSTS.iter().map(|h| h.to_string()));
     let hosts: BTreeSet<String> = domains
         .iter()
         .flat_map(|d| PREFIXES.iter().map(move |p| format!("{p}{d}")))
@@ -129,13 +177,42 @@ pub fn validate_domain(input: &str) -> Result<String, &'static str> {
     Ok(s.to_string())
 }
 
+/// Normalizes and validates desktop application executable names.
+pub fn validate_app(input: &str) -> Result<String, &'static str> {
+    let s = input.trim();
+    if s.is_empty() {
+        return Err("app_empty");
+    }
+    if s.contains('/') || s.contains('\\') || s.contains(':') {
+        return Err("app_invalid");
+    }
+    let lower = s.to_ascii_lowercase();
+    let name = if lower.ends_with(".exe") {
+        s.to_string()
+    } else {
+        format!("{s}.exe")
+    };
+    if name.len() > 64 {
+        return Err("app_too_long");
+    }
+    let stem = &name[..name.len() - 4];
+    if stem.is_empty()
+        || !stem
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b' ')
+    {
+        return Err("app_invalid");
+    }
+    Ok(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn defaults_cover_the_four_requested_services() {
-        let bl = build(&default_enabled(), &[]);
+        let bl = build(&default_enabled(), &[], &[]);
         for d in ["instagram.com", "facebook.com", "x.com", "twitter.com", "whatsapp.com"] {
             assert!(bl.domains.iter().any(|x| x == d), "{d} missing");
         }
@@ -144,7 +221,7 @@ mod tests {
 
     #[test]
     fn hosts_expand_prefixes_and_whatsapp_edges_without_duplicates() {
-        let bl = build(&default_enabled(), &["reddit.com".into()]);
+        let bl = build(&default_enabled(), &["reddit.com".into()], &[]);
         for h in ["www.instagram.com", "web.whatsapp.com", "e16.whatsapp.net", "mbasic.facebook.com", "www.reddit.com"] {
             assert!(bl.hosts.iter().any(|x| x == h), "{h} missing");
         }
@@ -154,9 +231,26 @@ mod tests {
 
     #[test]
     fn disabled_services_are_not_blocked() {
-        let bl = build(&["instagram".into()], &[]);
+        let bl = build(&["instagram".into()], &[], &[]);
         assert!(bl.domains.iter().all(|d| d.contains("instagram")));
         assert!(bl.apps.is_empty());
+    }
+
+    #[test]
+    fn custom_apps_are_included() {
+        let bl = build(&[], &[], &["Discord.exe".into(), "Spotify.exe".into()]);
+        assert_eq!(bl.apps, vec!["Discord.exe", "Spotify.exe"]);
+    }
+
+    #[test]
+    fn validate_app_handles_extensions_and_rejects_malformed() {
+        assert_eq!(validate_app("discord").as_deref(), Ok("discord.exe"));
+        assert_eq!(validate_app("Discord.exe").as_deref(), Ok("Discord.exe"));
+        assert_eq!(validate_app("my-app_1.0.exe").as_deref(), Ok("my-app_1.0.exe"));
+        assert_eq!(validate_app("").err(), Some("app_empty"));
+        assert_eq!(validate_app("c:\\bad.exe").err(), Some("app_invalid"));
+        assert_eq!(validate_app("../bad.exe").err(), Some("app_invalid"));
+        assert_eq!(validate_app(".exe").err(), Some("app_invalid"));
     }
 
     #[test]
