@@ -3,6 +3,13 @@ export type LayerStatus = { name: string; ok: boolean; error: string | null };
 
 export type ServiceInfo = { id: string; name: string; enabled: boolean; domains: string[] };
 
+export type ScheduleInfo = {
+  enabled: boolean;
+  start_hour: number;
+  end_hour: number;
+  days: number[];
+};
+
 export type Status = {
   locked: boolean;
   unlock_remaining_secs: number | null;
@@ -14,7 +21,9 @@ export type Status = {
   layers: LayerStatus[];
   services: ServiceInfo[];
   custom_domains: string[];
+  custom_apps: string[];
   unlock_minutes: number;
+  schedule: ScheduleInfo | null;
   watchdog: boolean | null;
   event_count: number;
   data_dir: string;

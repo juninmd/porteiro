@@ -108,6 +108,24 @@ pub async fn remove_domain(app: AppHandle, core: CoreState<'_>, hello: HelloStat
 }
 
 #[tauri::command]
+pub async fn add_custom_app(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential, app_name: String) -> Result<Status, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "adicionar um aplicativo").await?;
+    lock(&core).add_app(proof, &app_name)
+}
+
+#[tauri::command]
+pub async fn remove_custom_app(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential, app_name: String) -> Result<Status, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "remover um aplicativo").await?;
+    lock(&core).remove_app(proof, &app_name)
+}
+
+#[tauri::command]
+pub async fn set_schedule(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential, schedule: Option<crate::config::ScheduleConfig>) -> Result<Status, ApiError> {
+    let proof = prove(&app, &core, &hello, auth, "alterar o agendamento").await?;
+    lock(&core).set_schedule(proof, schedule)
+}
+
+#[tauri::command]
 pub async fn set_service(app: AppHandle, core: CoreState<'_>, hello: HelloState<'_>, auth: Credential, id: String, enabled: bool) -> Result<Status, ApiError> {
     let proof = prove(&app, &core, &hello, auth, "alterar um serviço").await?;
     lock(&core).set_service(proof, &id, enabled)

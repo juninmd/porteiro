@@ -68,6 +68,14 @@ pub struct ServiceInfo {
     pub domains: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct ScheduleInfo {
+    pub enabled: bool,
+    pub start_hour: u8,
+    pub end_hour: u8,
+    pub days: Vec<u8>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Status {
     pub locked: bool,
@@ -81,7 +89,9 @@ pub struct Status {
     pub layers: Vec<LayerStatus>,
     pub services: Vec<ServiceInfo>,
     pub custom_domains: Vec<String>,
+    pub custom_apps: Vec<String>,
     pub unlock_minutes: u32,
+    pub schedule: Option<ScheduleInfo>,
     pub watchdog: Option<bool>,
     pub event_count: usize,
     pub data_dir: String,

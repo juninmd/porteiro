@@ -18,6 +18,15 @@ fn domain_error(code: &'static str) -> ApiError {
     ApiError::new(code, message)
 }
 
+fn app_error(code: &'static str) -> ApiError {
+    let message = match code {
+        "app_empty" => "informe o nome do aplicativo",
+        "app_too_long" => "nome do aplicativo longo demais",
+        _ => "nome de aplicativo inválido (ex.: Discord.exe)",
+    };
+    ApiError::new(code, message)
+}
+
 impl Core {
     fn changed(&mut self, detail: String) -> Result<Status, ApiError> {
         self.save_config()?;
@@ -40,6 +49,31 @@ impl Core {
         self.authorize(proof, "remover um site")?;
         self.cfg.custom_domains.retain(|d| d != input);
         self.changed(format!("site removido: {input}"))
+    }
+
+    pub fn add_app(&mut self, proof: impl Into<Proof>, input: &str) -> Result<Status, ApiError> {
+        let app = blocklist::validate_app(input).map_err(app_error)?;
+        self.authorize(proof, "adicionar um aplicativo")?;
+        if !self.cfg.custom_apps.iter().any(|a| a.eq_ignore_ascii_case(&app)) {
+            self.cfg.custom_apps.push(app.clone());
+        }
+        self.changed(format!("aplicativo adicionado: {app}"))
+    }
+
+    pub fn remove_app(&mut self, proof: impl Into<Proof>, input: &str) -> Result<Status, ApiError> {
+        self.authorize(proof, "remover um aplicativo")?;
+        self.cfg.custom_apps.retain(|a| !a.eq_ignore_ascii_case(input));
+        self.changed(format!("aplicativo removido: {input}"))
+    }
+
+    pub fn set_schedule(&mut self, proof: impl Into<Proof>, schedule: Option<crate::config::ScheduleConfig>) -> Result<Status, ApiError> {
+        self.authorize(proof, "alterar o agendamento")?;
+        let detail = match &schedule {
+            Some(s) if s.enabled => format!("agendamento ativado: {:02}h às {:02}h", s.start_hour, s.end_hour),
+            _ => "agendamento desativado".to_string(),
+        };
+        self.cfg.schedule = schedule;
+        self.changed(detail)
     }
 
     pub fn set_service(&mut self, proof: impl Into<Proof>, id: &str, enabled: bool) -> Result<Status, ApiError> {
@@ -236,5 +270,22 @@ mod tests {
         assert_eq!(h.core.set_unlock_minutes("1406", 0).unwrap_err().code, "minutes_out_of_range");
         assert_eq!(h.core.set_unlock_minutes("1406", 241).unwrap_err().code, "minutes_out_of_range");
         assert_eq!(h.core.set_unlock_minutes("1406", 30).unwrap().unlock_minutes, 30);
+    }
+
+    #[test]
+    fn custom_apps_and_schedule_can_be_managed() {
+        use crate::config::ScheduleConfig;
+        let mut h = harness();
+        assert!(h.core.add_app("wrong", "Discord.exe").is_err());
+        let st = h.core.add_app("1406", "discord").unwrap();
+        assert_eq!(st.custom_apps, vec!["discord.exe"]);
+        let st = h.core.remove_app("1406", "discord.exe").unwrap();
+        assert!(st.custom_apps.is_empty());
+
+        let sched = ScheduleConfig { enabled: true, start_hour: 9, end_hour: 18, days: vec![1, 2, 3, 4, 5] };
+        let st = h.core.set_schedule("1406", Some(sched)).unwrap();
+        assert!(st.schedule.as_ref().unwrap().enabled);
+        let st = h.core.set_schedule("1406", None).unwrap();
+        assert!(st.schedule.is_none());
     }
 }

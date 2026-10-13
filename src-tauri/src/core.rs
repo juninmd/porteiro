@@ -137,7 +137,7 @@ impl Core {
     }
 
     pub fn blocklist(&self) -> Blocklist {
-        blocklist::build(&self.cfg.enabled_services, &self.cfg.custom_domains)
+        blocklist::build(&self.cfg.enabled_services, &self.cfg.custom_domains, &self.cfg.custom_apps)
     }
 
     fn remaining(&self) -> Option<u64> {
@@ -161,7 +161,14 @@ impl Core {
                 .map(|s| ServiceInfo { id: s.id, name: s.name, enabled: self.cfg.enabled_services.iter().any(|e| e == s.id), domains: s.domains.to_vec() })
                 .collect(),
             custom_domains: self.cfg.custom_domains.clone(),
+            custom_apps: self.cfg.custom_apps.clone(),
             unlock_minutes: self.cfg.unlock_minutes,
+            schedule: self.cfg.schedule.as_ref().map(|s| crate::api::ScheduleInfo {
+                enabled: s.enabled,
+                start_hour: s.start_hour,
+                end_hour: s.end_hour,
+                days: s.days.clone(),
+            }),
             watchdog: self.watchdog_ok,
             event_count: self.events.count(),
             data_dir: self.paths.data.display().to_string(),

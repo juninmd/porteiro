@@ -9,7 +9,7 @@
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust)
-![Testes](https://img.shields.io/badge/testes-156-brightgreen)
+![Testes](https://img.shields.io/badge/testes-159-brightgreen)
 
 <img src="docs/painel-bloqueado.png" alt="Painel do Porteiro com o bloqueio ativo" width="720">
 
@@ -118,7 +118,7 @@ Requisitos: Rust estável, Bun, WebView2 e Build Tools do Visual Studio.
 ```powershell
 bun install
 bun run lint && bun run typecheck && bun test    # frontend
-cd src-tauri; cargo test --lib                   # backend (149 testes; rode em debug)
+cd src-tauri; cargo test --lib                   # backend (152 testes; rode em debug)
 bun tauri build                                  # release: exige administrador + instalador NSIS
 ```
 

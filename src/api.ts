@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Credential, LogEvent, Status, TelegramAlerts, TelegramView } from "./types";
+import type { Credential, LogEvent, ScheduleInfo, Status, TelegramAlerts, TelegramView } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -42,6 +42,9 @@ export const api = {
   shot: (name: string) => call<ArrayBuffer>("get_shot", { name }),
   addDomain: (auth: Credential, domain: string) => call<Status>("add_domain", { auth, domain }),
   removeDomain: (auth: Credential, domain: string) => call<Status>("remove_domain", { auth, domain }),
+  addApp: (auth: Credential, app_name: string) => call<Status>("add_custom_app", { auth, app_name }),
+  removeApp: (auth: Credential, app_name: string) => call<Status>("remove_custom_app", { auth, app_name }),
+  setSchedule: (auth: Credential, schedule: ScheduleInfo | null) => call<Status>("set_schedule", { auth, schedule }),
   setService: (auth: Credential, id: string, enabled: boolean) => call<Status>("set_service", { auth, id, enabled }),
   setUnlockMinutes: (auth: Credential, minutes: number) => call<Status>("set_unlock_minutes", { auth, minutes }),
   changePassword: (current: string, next: string) => call<Status>("change_password", { current, next }),

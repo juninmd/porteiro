@@ -143,6 +143,34 @@ export function Settings({ status, onStatus }: { status: Status; onStatus: (s: S
         </select>
       </section>
 
+      <section aria-labelledby="schedule-section">
+        <h2 id="schedule-section" className="mb-3 text-lg font-semibold">
+          Rotina e Agendamento de Foco
+        </h2>
+        <p className="mb-3 text-sm text-mute">
+          {status.schedule?.enabled
+            ? `Ativado: bloqueio automático das ${String(status.schedule.start_hour).padStart(2, "0")}:00 às ${String(status.schedule.end_hour).padStart(2, "0")}:00.`
+            : "Defina um intervalo de horário diário para garantir foco contínuo."}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            const currentlyEnabled = status.schedule?.enabled ?? false;
+            const next = currentlyEnabled
+              ? null
+              : { enabled: true, start_hour: 8, end_hour: 18, days: [1, 2, 3, 4, 5] };
+            ask({
+              title: currentlyEnabled ? "Desativar agendamento de rotina" : "Ativar agendamento (08:00 às 18:00)",
+              hint: "Alterar a rotina de foco exige confirmação com a senha.",
+              run: (auth) => api.setSchedule(auth, next),
+            });
+          }}
+          className="rounded-lg border border-line px-4 py-2 text-sm text-ink hover:bg-raised"
+        >
+          {status.schedule?.enabled ? "Desativar Rotina de Foco" : "Ativar Rotina Comercial (08h às 18h)"}
+        </button>
+      </section>
+
       <section aria-labelledby="layers-section">
         <h2 id="layers-section" className="mb-3 text-lg font-semibold">
           Camadas de bloqueio

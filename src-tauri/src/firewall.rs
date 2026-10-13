@@ -63,6 +63,24 @@ pub fn show_args(index: usize) -> Vec<String> {
     ["advfirewall", "firewall", "show", "rule"].iter().map(|s| s.to_string()).chain([format!("name={}", rule_name(index))]).collect()
 }
 
+pub const DOT_RULES: &[&str] = &["Porteiro-DoT-TCP", "Porteiro-DoT-UDP"];
+
+pub fn dot_args() -> Vec<Vec<String>> {
+    vec![
+        ["advfirewall", "firewall", "add", "rule", "name=Porteiro-DoT-TCP", "dir=out", "action=block", "enable=yes", "profile=any", "protocol=TCP", "remoteport=853"]
+            .iter().map(|s| s.to_string()).collect(),
+        ["advfirewall", "firewall", "add", "rule", "name=Porteiro-DoT-UDP", "dir=out", "action=block", "enable=yes", "profile=any", "protocol=UDP", "remoteport=853"]
+            .iter().map(|s| s.to_string()).collect(),
+    ]
+}
+
+pub fn delete_dot_args() -> Vec<Vec<String>> {
+    DOT_RULES
+        .iter()
+        .map(|name| ["advfirewall", "firewall", "delete", "rule", &format!("name={name}")].iter().map(|s| s.to_string()).collect())
+        .collect()
+}
+
 pub fn chunks(ips: &[IpAddr]) -> impl Iterator<Item = &[IpAddr]> {
     ips.chunks(IPS_PER_RULE)
 }
