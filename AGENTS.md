@@ -27,3 +27,15 @@ Tauri 2 (Rust) + React 19 + Tailwind v4 + Vite, Bun, Biome. Windows only.
 - `PORTEIRO_TELEGRAM_API` is honoured in debug builds only (`api_base`); release must ignore it.
 - `ureq` needs the `native-tls` feature (`native-tls-no-default` compiles the connector out and https panics; `the_tls_setup_does_not_panic_on_the_first_https_handshake` pins it). Trust comes from the Windows store (`RootCerts::PlatformVerifier`, pinned by a test) so a corporate proxy's CA works. `live_https_*` (`--ignored`) checks the real Telegram.
 - Do not apply the data-dir ACL when not elevated: an unelevated admin token would lock the developer out.
+
+<!-- base-actions-main-policy -->
+## GitHub Actions — padrão obrigatório (@main)
+
+- Referencie as actions internas sempre pelo branch, nunca por SHA:
+  - `uses: juninmd/base-actions/<action>@main`
+  - `uses: juninmd/base-actions/.github/workflows/<arquivo>.yml@main`
+- Não fixe `@<sha>` em `juninmd/base-actions`: a atualização é centralizada no
+  `main` e passa a valer no próximo run.
+- PRs cujos checks não iniciam por billing/spending limit são mesclados pelo bot central
+  `juninmd/base-actions/.github/workflows/auto-merge-billing-blocked.yml`.
+  Para impedir o merge automático de um PR, aplique a label `do-not-merge`.
