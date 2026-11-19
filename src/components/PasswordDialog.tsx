@@ -16,6 +16,7 @@ function PasswordDialog({
   onResult: (s: Status | undefined) => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,8 @@ function PasswordDialog({
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "algo deu errado");
       setPassword("");
+      // Confirm is disabled again once the field is empty; keep keyboard focus inside the form
+      inputRef.current?.focus();
     } finally {
       setBusy(false);
     }
@@ -63,14 +66,17 @@ function PasswordDialog({
           Senha
           <input
             id="pw-input"
+            ref={inputRef}
             type="password"
+            aria-invalid={error !== null}
+            aria-describedby="pw-error"
             autoComplete="off"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="mt-1 w-full rounded-lg border border-line bg-bg px-3 py-2 text-base text-ink"
           />
         </label>
-        <p role="alert" className="min-h-5 text-sm text-danger">
+        <p id="pw-error" role="alert" className="min-h-5 text-sm text-danger">
           {error}
         </p>
         <div className="flex flex-wrap justify-end gap-2">
