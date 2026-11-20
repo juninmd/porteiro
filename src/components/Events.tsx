@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { mergeEvents } from "../events";
 import { formatWhen, type Group, KINDS, orderShots, shotKind } from "../format";
 import type { LogEvent } from "../types";
 import { ShotImage } from "./ShotImage";
@@ -60,8 +61,8 @@ export function Events({ eventCount }: { eventCount: number }) {
   const reload = useCallback(async () => {
     try {
       const page = await api.events(0, PAGE);
-      setEvents(page);
-      setMore(page.length === PAGE);
+      setEvents((prev) => mergeEvents(page, prev));
+      if (page.length < PAGE) setMore(false);
       setError(null);
     } catch {
       setError("não foi possível ler o registro");
@@ -74,9 +75,13 @@ export function Events({ eventCount }: { eventCount: number }) {
   }, [reload]);
 
   const loadMore = async () => {
-    const page = await api.events(events.length, PAGE);
-    setEvents((prev) => [...prev, ...page]);
-    setMore(page.length === PAGE);
+    try {
+      const page = await api.events(events.length, PAGE);
+      setEvents((prev) => mergeEvents(prev, page));
+      setMore(page.length === PAGE);
+    } catch {
+      setError("não foi possível ler o registro");
+    }
   };
 
   const shown = events.filter((e) => filter === "all" || KINDS[e.kind].group === filter);
