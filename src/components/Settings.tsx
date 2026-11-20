@@ -8,10 +8,12 @@ function ChangePassword({ onStatus }: { onStatus: (s: Status) => void }) {
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   const mismatch = again.length > 0 && next !== again;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setBusy(true);
     try {
       onStatus(await api.changePassword(current, next));
       setMessage({ ok: true, text: "Senha trocada." });
@@ -20,6 +22,8 @@ function ChangePassword({ onStatus }: { onStatus: (s: Status) => void }) {
       setAgain("");
     } catch (err) {
       setMessage({ ok: false, text: err instanceof ApiError ? err.message : "não foi possível trocar a senha" });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -64,10 +68,10 @@ function ChangePassword({ onStatus }: { onStatus: (s: Status) => void }) {
       </p>
       <button
         type="submit"
-        disabled={!current || next.length < 4 || next !== again}
+        disabled={busy || !current || next.length < 4 || next !== again}
         className="rounded-lg bg-amber px-4 py-2 text-sm font-semibold text-bg disabled:opacity-50"
       >
-        Trocar senha
+        {busy ? "Trocando…" : "Trocar senha"}
       </button>
     </form>
   );
