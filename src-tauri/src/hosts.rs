@@ -41,9 +41,6 @@ pub fn render(original: &str, hosts: &[String], locked: bool) -> String {
     let eol = if original.contains('\n') && !original.contains("\r\n") { "\n" } else { "\r\n" };
     let lines: Vec<&str> = original.lines().collect();
     let mut kept: Vec<String> = strip_block(lines).into_iter().map(str::to_string).collect();
-    while kept.last().is_some_and(|l| l.trim().is_empty()) {
-        kept.pop();
-    }
     if locked && !hosts.is_empty() {
         kept.push(BEGIN.to_string());
         for h in hosts {
@@ -128,6 +125,14 @@ mod tests {
         let locked = render(BASE, &hosts(), true);
         assert_eq!(render(&locked, &hosts(), true), locked);
         assert_eq!(render(&locked, &hosts(), false), BASE);
+    }
+
+    #[test]
+    fn unlock_restores_trailing_blank_lines() {
+        let base = "127.0.0.1 localhost\r\n::1 localhost\r\n\r\n\r\n";
+        let locked = render(base, &hosts(), true);
+        assert_eq!(render(&locked, &hosts(), true), locked);
+        assert_eq!(render(&locked, &hosts(), false), base);
     }
 
     #[test]
